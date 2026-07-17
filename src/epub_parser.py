@@ -1,4 +1,3 @@
-import hashlib
 import json
 import os
 
@@ -11,74 +10,106 @@ class BookTracker:
     @staticmethod
     def _load_tracker() -> dict:
         if not os.path.exists(TRACKER_FILE):
-            return {"indexed_books": {}}
+            return {"databases": {}}
         with open(TRACKER_FILE, "r", encoding="utf-8") as f:
             try:
                 return json.load(f)
             except json.JSONDecodeError:
-                return {"indexed_books": {}}
+                return {"databases": {}}
 
     @staticmethod
     def _save_tracker(tracker_data: dict):
         with open(TRACKER_FILE, "w", encoding="utf-8") as f:
             json.dump(tracker_data, f, indent=4)
 
-    @staticmethod
-    def calculate_file_hash(filepath: str) -> str:
-        sha256 = hashlib.sha256()
-        with open(filepath, "rb") as f:
-            for chunk in iter(lambda: f.read(4096), b""):
-                sha256.update(chunk)
-        return sha256.hexdigest()
-
     @classmethod
-    def get_unindexed_epubs(cls) -> list[tuple[str, str]]:
+    def scan_for_modified_or_new_files(cls) -> list[dict]:
+        """
+        Inspects directory. Finds new EPUB files or progressive files where
+        the file metadata (file size or mod-time) has changed since the last run.
+        """
         tracker = cls._load_tracker()
-        # Parse flat list of processed hashes across all database objects
-        indexed_hashes = set()
-        for data in tracker["indexed_books"].values():
-            for h in data.get("hashes", []):
-                indexed_hashes.add(h)
-            if "hash" in data:  # Legacy compatibility
-                indexed_hashes.add(data["hash"])
+        all_processed_files = {}
 
-        new_epubs = []
+        # Build mapping of files we already know about
+        for db_id, db_meta in tracker["databases"].items():
+            for f_path, f_meta in db_meta.get("tracked_files", {}).items():
+                all_processed_files[f_path] = f_meta
+
+        pending_updates = []
         for filename in os.listdir(BOOKS_DIR):
             if filename.endswith(".epub"):
                 file_path = os.path.join(BOOKS_DIR, filename)
-                file_hash = cls.calculate_file_hash(file_path)
-                if file_hash not in indexed_hashes:
-                    new_epubs.append((filename, file_path))
-        return new_epubs
+                stat = os.stat(file_path)
+                current_size = stat.st_size
+                current_mtime = stat.st_mtime
+
+                # Check if file has never been seen, or size/mtime changed
+                if file_path not in all_processed_files:
+                    pending_updates.append(
+                        {"filename": filename, "path": file_path, "status": "new"}
+                    )
+                else:
+                    known = all_processed_files[file_path]
+                    if current_size != known["size"] or current_mtime != known["mtime"]:
+                        pending_updates.append(
+                            {
+                                "filename": filename,
+                                "path": file_path,
+                                "status": "updated",  # Chapter count increased in progressive build
+                            }
+                        )
+
+        return pending_updates
 
     @classmethod
-    def register_book(cls, filename: str, file_hash: str, book_id: str, db_name: str):
+    def get_all_hashes_for_database(cls, db_id: str) -> set[str]:
         tracker = cls._load_tracker()
+        if db_id in tracker["databases"]:
+            return set(tracker["databases"][db_id].get("chunk_hashes", []))
+        return set()
 
-        if book_id in tracker["indexed_books"]:
-            # Append file metadata to existing database entry
-            if filename not in tracker["indexed_books"][book_id]["source_files"]:
-                tracker["indexed_books"][book_id]["source_files"].append(filename)
-            if file_hash not in tracker["indexed_books"][book_id]["hashes"]:
-                tracker["indexed_books"][book_id]["hashes"].append(file_hash)
-        else:
-            # Create a brand new database collection tracking system
-            tracker["indexed_books"][book_id] = {
+    @classmethod
+    def register_indexing_run(
+        cls,
+        db_id: str,
+        db_name: str,
+        file_path: str,
+        filename: str,
+        new_hashes: list[str],
+    ):
+        tracker = cls._load_tracker()
+        stat = os.stat(file_path)
+
+        if db_id not in tracker["databases"]:
+            tracker["databases"][db_id] = {
                 "database_name": db_name,
-                "source_files": [filename],
-                "hashes": [file_hash],
-                "id": book_id,
+                "tracked_files": {},
+                "chunk_hashes": [],
             }
+
+        # Log metadata parameters to stop tracking matching loops
+        tracker["databases"][db_id]["tracked_files"][file_path] = {
+            "filename": filename,
+            "size": stat.st_size,
+            "mtime": stat.st_mtime,
+        }
+
+        # Append unique paragraph fingerprints to block list duplicates
+        existing_hashes = set(tracker["databases"][db_id]["chunk_hashes"])
+        for h in new_hashes:
+            if h not in existing_hashes:
+                tracker["databases"][db_id]["chunk_hashes"].append(h)
+
         cls._save_tracker(tracker)
 
     @classmethod
-    def get_indexed_books(cls) -> dict:
-        return cls._load_tracker().get("indexed_books", {})
+    def get_indexed_databases(cls) -> dict:
+        return cls._load_tracker().get("databases", {})
 
 
 def extract_text_from_epub(epub_path: str) -> str:
     try:
-        # Use epub_to_text for conversion
         return epub_to_text(epub_path)
     except Exception as e:
-        raise RuntimeError(f"Failed parsing epub {epub_path}: {e}")
+        raise RuntimeError(f"Error accessing or structural failure inside EPUB: {e}")

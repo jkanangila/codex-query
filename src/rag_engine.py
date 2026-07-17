@@ -1,3 +1,4 @@
+import hashlib
 import os
 
 import chromadb
@@ -20,62 +21,72 @@ def get_embeddings():
 
 
 def sanitize_collection_name(name: str) -> str:
-    """ChromaDB collection names must match a specific regex."""
     sanitized = "".join(c if c.isalnum() or c in "-_" else "_" for c in name)
     sanitized = sanitized.strip("_")
-    # Must be 3-63 characters, start with alpha-numeric
     if len(sanitized) < 3:
         sanitized += "_db"
     return sanitized[:63].lower()
 
 
-def index_new_book(book_title: str, text: str) -> str:
-    """Chops book text up and embeds it into its own Chroma collection."""
-    collection_id = sanitize_collection_name(book_title)
+def compute_string_hash(text: str) -> str:
+    """Generates a stable unique identifier for a specific snippet of text."""
+    return hashlib.sha256(text.encode("utf-8")).hexdigest()
+
+
+def index_new_book_content(
+    collection_id: str, text: str, existing_hashes: set[str]
+) -> list[str]:
+    """
+    Slices raw text, filters out chunks that are already recorded in the DB registry,
+    and indexes only completely new content chunks.
+    """
     embeddings = get_embeddings()
+    doc = Document(page_content=text)
 
-    # Wrap text in Langchain Doc
-    doc = Document(page_content=text, metadata={"source": book_title})
-
-    # Split text (LitRPG optimization: preserving lists and stat blocks)
     splitter = RecursiveCharacterTextSplitter(
         chunk_size=CHUNK_SIZE,
         chunk_overlap=CHUNK_OVERLAP,
         separators=["\n\n", "\n", " ", ""],
     )
-    chunks = splitter.split_documents([doc])
+    raw_chunks = splitter.split_documents([doc])
 
-    # Store in ChromaDB collection
-    Chroma.from_documents(
-        documents=chunks,
-        embedding=embeddings,
-        collection_name=collection_id,
-        client=chroma_client,
-    )
-    return collection_id
+    # Audit chunks to filter out duplicates
+    new_chunks = []
+    newly_added_hashes = []
+
+    for chunk in raw_chunks:
+        chunk_hash = compute_string_hash(chunk.page_content)
+        if chunk_hash not in existing_hashes:
+            new_chunks.append(chunk)
+            newly_added_hashes.append(chunk_hash)
+
+    if new_chunks:
+        Chroma.from_documents(
+            documents=new_chunks,
+            embedding=embeddings,
+            collection_name=collection_id,
+            client=chroma_client,
+        )
+
+    return newly_added_hashes
 
 
 def query_book(collection_id: str, question: str):
-    """Retrieves context from specific collection and queries LLM."""
     embeddings = get_embeddings()
     llm = ChatOllama(model=LLM_MODEL, temperature=0.2)
 
-    # Fetch collection vector store
     vector_store = Chroma(
         collection_name=collection_id,
         embedding_function=embeddings,
         client=chroma_client,
     )
 
-    # Find top 5 matching blocks
     retriever = vector_store.as_retriever(search_kwargs={"k": 5})
 
-    # System Prompt for LitRPG context
     system_prompt = (
-        "You are an expert assistant on LitRPG and Progression Fantasy novels.\n"
-        "Use the retrieved passages from the novel below to answer the user's question.\n"
-        "Provide a comprehensive, accurate answer based strictly on the text provided.\n"
-        "If you do not know or if the source context doesn't contain it, say so clearly.\n\n"
+        "You are an expert lore-master assistant for a LitRPG/Progression Fantasy series.\n"
+        "Answer the user's questions truthfully and completely based on the provided text sections.\n"
+        "If the context does not contain the answer, state that it's unconfirmed inside the text.\n\n"
         "Context:\n{context}"
     )
 
@@ -89,6 +100,5 @@ def query_book(collection_id: str, question: str):
     document_chain = create_stuff_documents_chain(llm, prompt)
     retrieval_chain = create_retrieval_chain(retriever, document_chain)
 
-    # Run query
     response = retrieval_chain.invoke({"input": question})
     return response["answer"]
