@@ -1,10 +1,9 @@
 import hashlib
-import os
 
 import chromadb
-from langchain.chains import create_retrieval_chain
-from langchain.chains.combine_documents import create_stuff_documents_chain
 from langchain_chroma import Chroma
+from langchain_classic.chains import create_retrieval_chain
+from langchain_classic.chains.combine_documents import create_stuff_documents_chain
 from langchain_core.documents import Document
 from langchain_core.prompts import ChatPromptTemplate
 from langchain_ollama import ChatOllama, OllamaEmbeddings
@@ -35,12 +34,11 @@ def compute_string_hash(text: str) -> str:
 
 def index_new_book_content(
     collection_id: str, text: str, existing_hashes: set[str]
-) -> list[str]:
+) -> tuple[list[Document], list[str]]:
     """
-    Slices raw text, filters out chunks that are already recorded in the DB registry,
-    and indexes only completely new content chunks.
+    Slices raw text, audits chunks to filter out duplicates, and returns
+    the list of NEW documents along with their corresponding hashes.
     """
-    embeddings = get_embeddings()
     doc = Document(page_content=text)
 
     splitter = RecursiveCharacterTextSplitter(
@@ -50,7 +48,6 @@ def index_new_book_content(
     )
     raw_chunks = splitter.split_documents([doc])
 
-    # Audit chunks to filter out duplicates
     new_chunks = []
     newly_added_hashes = []
 
@@ -60,20 +57,13 @@ def index_new_book_content(
             new_chunks.append(chunk)
             newly_added_hashes.append(chunk_hash)
 
-    if new_chunks:
-        Chroma.from_documents(
-            documents=new_chunks,
-            embedding=embeddings,
-            collection_name=collection_id,
-            client=chroma_client,
-        )
-
-    return newly_added_hashes
+    # Return the data chunks back to the CLI context manager to let it drive progress loops
+    return new_chunks, newly_added_hashes
 
 
 def query_book(collection_id: str, question: str):
     embeddings = get_embeddings()
-    llm = ChatOllama(model=LLM_MODEL, temperature=0.2)
+    llm = ChatOllama(model=LLM_MODEL, temperature=0.3, num_ctx=1024, num_thread=2)
 
     vector_store = Chroma(
         collection_name=collection_id,
@@ -81,7 +71,7 @@ def query_book(collection_id: str, question: str):
         client=chroma_client,
     )
 
-    retriever = vector_store.as_retriever(search_kwargs={"k": 5})
+    retriever = vector_store.as_retriever(search_kwargs={"k": 2})
 
     system_prompt = (
         "You are an expert lore-master assistant for a LitRPG/Progression Fantasy series.\n"

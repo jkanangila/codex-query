@@ -1,0 +1,24 @@
+{
+    "indexed_books": {
+        "stardust": {
+            "database_name": "Stardust",
+            "source_files": [
+                "Stardust.epub"
+            ],
+            "hashes": [
+                "5eb9fd0cefd66218fcaefc22cc20545682492e4dd47ff77a2d6af929d55aa271"
+            ],
+            "id": "stardust"
+        },
+        "our_apartment_complex_transmigrated__again": {
+            "database_name": "Our Apartment Complex Transmigrated\u2026 Again",
+            "source_files": [
+                "Our Apartment Complex Transmigrated\u2026 Again.epub"
+            ],
+            "hashes": [
+                "6b81ff00dac132e3464805ec621df4ff6abed8845ab8b1970c1e587c0d92c2a7"
+            ],
+            "id": "our_apartment_complex_transmigrated__again"
+        }
+    }
+}
