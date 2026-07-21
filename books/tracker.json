@@ -19,6 +19,26 @@
                 "6b81ff00dac132e3464805ec621df4ff6abed8845ab8b1970c1e587c0d92c2a7"
             ],
             "id": "our_apartment_complex_transmigrated__again"
+        },
+        "the_stand_by_stephen_king": {
+            "database_name": "The Stand by Stephen King",
+            "source_files": [
+                "The Stand by Stephen King.epub"
+            ],
+            "hashes": [
+                "f2a53dc651aa56d421c9a50546f880af47747f14b573434273ba5499a32e4aa6"
+            ],
+            "id": "the_stand_by_stephen_king"
+        },
+        "the_primal_hunter": {
+            "database_name": "The Primal Hunter",
+            "source_files": [
+                "The Primal Hunter.epub"
+            ],
+            "hashes": [
+                "a38216b3190d42ec09c39bffa682a46d9aebd834894a54def6ec2602143a88ec"
+            ],
+            "id": "the_primal_hunter"
         }
     }
 }

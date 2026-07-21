@@ -33,11 +33,9 @@ pip-delete-this-directory.txt
 # Databases and user local books (Crucial for RAG privacy)
 db/
 books/*.epub
+books/*/*.epub
+*.epub
 books/output_folder/
-
-# Allow tracking files inside directories, but ignore raw data files
-!books/
-!books/tracker.json
 
 # Environment configuration / secrets
 .env

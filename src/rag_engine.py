@@ -3,20 +3,22 @@ import hashlib
 import chromadb
 from langchain_chroma import Chroma
 from langchain_classic.chains import create_retrieval_chain
-from langchain_classic.chains.combine_documents import create_stuff_documents_chain
+from langchain_classic.chains.combine_documents import \
+    create_stuff_documents_chain
 from langchain_core.documents import Document
 from langchain_core.prompts import ChatPromptTemplate
 from langchain_ollama import ChatOllama, OllamaEmbeddings
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 
-from src.config import CHUNK_OVERLAP, CHUNK_SIZE, DB_DIR, EMBEDDING_MODEL, LLM_MODEL
+from src.config import (CHUNK_OVERLAP, CHUNK_SIZE, DB_DIR, EMBEDDING_MODEL,
+                        LLM_MODEL, OLLAMA_BASE_URL)
 
 # Initialize persistent ChromaDB Client
 chroma_client = chromadb.PersistentClient(path=DB_DIR)
 
 
 def get_embeddings():
-    return OllamaEmbeddings(model=EMBEDDING_MODEL)
+    return OllamaEmbeddings(model=EMBEDDING_MODEL, base_url=OLLAMA_BASE_URL)
 
 
 def sanitize_collection_name(name: str) -> str:
@@ -62,8 +64,12 @@ def index_new_book_content(
 
 
 def query_book(collection_id: str, question: str):
-    embeddings = get_embeddings()
-    llm = ChatOllama(model=LLM_MODEL, temperature=0.3, num_ctx=1024, num_thread=2)
+    embeddings = OllamaEmbeddings(model=EMBEDDING_MODEL, base_url=OLLAMA_BASE_URL)
+    llm = ChatOllama(
+        model=LLM_MODEL,
+        temperature=0.3,
+        base_url=OLLAMA_BASE_URL,
+    )
 
     vector_store = Chroma(
         collection_name=collection_id,
