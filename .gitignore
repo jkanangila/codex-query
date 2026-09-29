@@ -52,3 +52,21 @@ venv.bak/
 *.swp
 *.swo
 .DS_Store
+
+# Jupyter Notebook checkpoints
+.ipynb_checkpoints/
+
+# IPython history & cache
+.ipython/
+*.pyc
+
+# Jupyter Lab workspace & settings
+.jupyter/
+.local/share/jupyter/
+
+# Visual Studio Code Jupyter interactive export files
+*.ipynb_*
+
+
+# Databases location
+.codex-query/

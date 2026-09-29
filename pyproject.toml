@@ -1,0 +1,84 @@
+
+[project]
+name = "codex-query"
+version = "0.1.0"
+description = "Offline EPUB RAG for private local book collections using ChromaDB and Ollama."
+readme = "README.md"
+requires-python = ">=3.12"
+dependencies = [
+  "beautifulsoup4>=4.13",
+  "chromadb>=1.1.0",
+  "click>=8.1",
+  "ebooklib>=0.18",
+  "flet>=0.80",
+  "ollama>=0.6",
+  "questionary>=2.1",
+  "rich>=14.0",
+  "sqlmodel>=0.0.47",
+]
+
+[project.scripts]
+codex-query = "codex_query.presentation.cli.app:main"
+codex-query-ui = "codex_query.presentation.ui.app:start"
+cli = "codex_query.presentation.cli.app:main"
+ui = "codex_query.presentation.ui.app:main"
+
+[dependency-groups]
+dev = [
+    "basedpyright>=1.31",
+    "ipykernel>=7.3.0",
+    "jupyter-client>=8.10.0",
+    "jupytext>=1.19.5",
+    "pynvim>=0.6.0",
+    "pytest>=8.4",
+    "pytest-cov>=6.2",
+    "ruff>=0.13",
+]
+
+[tool.uv]
+default-groups = ["dev"]
+
+[build-system]
+requires = ["uv_build>=0.8,<0.9"]
+build-backend = "uv_build"
+
+[tool.uv.build-backend]
+module-name = "codex_query"
+module-root = "src"
+
+[tool.flet]
+org = "codex_query"
+product = "Offline EPUB RAG"
+module = "app"
+app.path = "src/codex_query/presentation/ui/"
+
+[tool.ruff]
+target-version = "py312"
+line-length = 88
+src = ["src"]
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "B", "UP", "SIM", "ANN", "RUF"]
+ignore = ["ANN401"]
+
+[tool.ruff.format]
+quote-style = "double"
+indent-style = "space"
+
+[tool.pyright]
+include = ["src", "tests"]
+typeCheckingMode = "strict"
+pythonVersion = "3.12"
+reportMissingTypeStubs = false
+reportUnknownMemberType = false
+reportUnknownVariableType = false
+reportUnknownArgumentType = false
+reportAbstractUsage = "error"
+reportImplicitAbstractClass = "error"
+reportImplicitOverride = "warning"
+reportImportCycles = "error"
+
+[tool.pytest.ini_options]
+pythonpath = ["src"]
+testpaths = ["tests"]
+addopts = "-q"
