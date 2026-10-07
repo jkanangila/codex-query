@@ -8,13 +8,13 @@ from typing import override
 
 import chromadb
 
-from codex_query.domain.models import SearchHit, TextChunk
-from codex_query.domain.ports import VectorStore
+from codex_query.application.ports.interfaces import IVectorStore
+from codex_query.domain.models.document import SearchHit, TextChunk
 
 logger = logging.getLogger(__name__)
 
 
-class ChromaVectorStore(VectorStore):
+class ChromaVectorStore(IVectorStore):
     """Persistent vector store implementation powered by ChromaDB.
 
     Manages document embeddings, metadata indexing, and similarity searching
@@ -76,20 +76,21 @@ class ChromaVectorStore(VectorStore):
             book_id: Unique identifier for the book.
             chapter_href: Relative link/path identifying the chapter within the book.
         """
-        collection = self._client.get_or_create_collection(
-            name=_collection_name(series)
-        )
-        logger.debug(
-            "Chroma delete chapter: series=%r book=%s chapter=%s",
-            series,
-            book_id,
-            chapter_href,
-        )
+        try:
+            collection = self._client.get_collection(name=_collection_name(series))
+            logger.debug(
+                "Chroma delete chapter: series=%r book=%s chapter=%s",
+                series,
+                book_id,
+                chapter_href,
+            )
 
-        # Delete all records matching both book_id and chapter_href metadata filters
-        collection.delete(
-            where={"$and": [{"book_id": book_id}, {"chapter_href": chapter_href}]}
-        )
+            # Delete all records matching both book_id and chapter_href metadata filters
+            collection.delete(
+                where={"$and": [{"book_id": book_id}, {"chapter_href": chapter_href}]}
+            )
+        except ValueError:
+            logger.warning("Chroma delete failed! series=%s doesn't exist. %s", series)
 
     @override
     def search(
@@ -105,28 +106,32 @@ class ChromaVectorStore(VectorStore):
         Returns:
             List of SearchHit instances sorted by similarity distance.
         """
-        collection = self._client.get_or_create_collection(
-            name=_collection_name(series)
-        )
-        logger.debug("Chroma query: series=%r limit=%d", series, limit)
+        try:
+            collection = self._client.get_collection(name=_collection_name(series))
+            logger.debug("Chroma query: series=%r limit=%d", series, limit)
 
-        # Execute vector query against ChromaDB
-        result = collection.query(query_embeddings=[list(embedding)], n_results=limit)
-
-        # Safe extraction of primary result list from query payload
-        documents = (result.get("documents") or [[]])[0]
-        distances = (result.get("distances") or [[]])[0]
-        metadatas = (result.get("metadatas") or [[]])[0]
-
-        # Map raw query results into domain model SearchHit objects
-        return [
-            SearchHit(
-                text=str(d),
-                distance=float(distances[i]),
-                metadata=dict(metadatas[i] or {}),
+            # Execute vector query against ChromaDB
+            result = collection.query(
+                query_embeddings=[list(embedding)], n_results=limit
             )
-            for i, d in enumerate(documents)
-        ]
+
+            # Safe extraction of primary result list from query payload
+            documents = (result.get("documents") or [[]])[0]
+            distances = (result.get("distances") or [[]])[0]
+            metadatas = (result.get("metadatas") or [[]])[0]
+
+            # Map raw query results into domain model SearchHit objects
+            return [
+                SearchHit(
+                    text=str(d),
+                    distance=float(distances[i]),
+                    metadata=dict(metadatas[i] or {}),
+                )
+                for i, d in enumerate(documents)
+            ]
+        except ValueError:
+            logger.warning("Chroma query failed! series=%s doesn't exist. %s", series)
+            return []
 
 
 def _collection_name(series: str) -> str:

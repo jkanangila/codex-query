@@ -6,13 +6,13 @@ from typing import override
 
 from ollama import Client
 
-from codex_query.domain.models import SearchHit
-from codex_query.domain.ports import EmbeddingModel, Generator
+from codex_query.application.ports.interfaces import IEmbeddingModel, IGenerator
+from codex_query.domain.models.document import SearchHit
 
 logger = logging.getLogger(__name__)
 
 
-class OllamaEmbeddingModel(EmbeddingModel):
+class OllamaEmbeddingModel(IEmbeddingModel):
     """Ollama client wrapper for generating dense text vector embeddings."""
 
     def __init__(self, client: Client, model: str) -> None:
@@ -43,7 +43,7 @@ class OllamaEmbeddingModel(EmbeddingModel):
         return [list(vector) for vector in response.embeddings]
 
 
-class OllamaGenerator(Generator):
+class OllamaGenerator(IGenerator):
     """RAG response generator using Ollama chat models."""
 
     def __init__(self, client: Client, model: str, temperature: float = 0.1) -> None:
