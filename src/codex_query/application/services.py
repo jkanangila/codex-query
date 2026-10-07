@@ -6,16 +6,16 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import override
 
-from codex_query.domain.chunking import chunk_chapter
-from codex_query.domain.models import Answer, Book, Chapter
-from codex_query.domain.ports import (
-    BookReader,
-    EmbeddingModel,
-    Generator,
-    IndexLedger,
-    QueryService,
-    VectorStore,
+from codex_query.application.ports.interfaces import (
+    IBookReader,
+    IEmbeddingModel,
+    IGenerator,
+    ILedger,
+    IQueryService,
+    IVectorStore,
 )
+from codex_query.domain.chunking import chunk_chapter
+from codex_query.domain.models.document import Answer, Book, Chapter
 
 logger = logging.getLogger(__name__)
 
@@ -63,10 +63,10 @@ class IndexService:
 
     def __init__(
         self,
-        reader: BookReader,
-        ledger: IndexLedger,
-        vectors: VectorStore,
-        embeddings: EmbeddingModel,
+        reader: IBookReader,
+        ledger: ILedger,
+        vectors: IVectorStore,
+        embeddings: IEmbeddingModel,
         *,
         chunk_chars: int = 1800,
         chunk_overlap: int = 250,
@@ -257,12 +257,12 @@ class IndexService:
             progress(event)
 
 
-class QueryServiceImpl(QueryService):
+class QueryServiceImpl(IQueryService):
     def __init__(
         self,
-        embeddings: EmbeddingModel,
-        vectors: VectorStore,
-        generator: Generator,
+        embeddings: IEmbeddingModel,
+        vectors: IVectorStore,
+        generator: IGenerator,
         progress: Progress | None = None,
     ) -> None:
         self._embeddings, self._vectors, self._generator, self._progress = (
