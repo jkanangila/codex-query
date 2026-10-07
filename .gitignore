@@ -70,3 +70,7 @@ venv.bak/
 
 # Databases location
 .codex-query/
+
+# temporary locations
+.temp/
+temp/
