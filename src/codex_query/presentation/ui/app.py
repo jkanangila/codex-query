@@ -1,28 +1,33 @@
 from __future__ import annotations
 
 import asyncio
-import logging
 from pathlib import Path
 from queue import Queue
 
 import flet as ft
+from dotenv import load_dotenv
 
 from codex_query.application.config import Settings
 from codex_query.application.services import ProgressEvent
 from codex_query.bootstrap import build_services
-from codex_query.infrastructure.logging import configure_logging
+from codex_query.infrastructure.logging.config import asyncio_handler, configure_logging
+from codex_query.infrastructure.logging.factory import create_logger
 from codex_query.infrastructure.rag.utils import get_ollama_base_url
+from codex_query.presentation.ui.utils.update_control import update_controls
 
-logger = logging.getLogger(__name__)
+load_dotenv()
+logger = create_logger(__name__)
 
 
 async def _main(page: ft.Page) -> None:
     """Build and manage the Flet GUI lifecycle."""
+    asyncio.get_running_loop().set_exception_handler(asyncio_handler)
     # Configure main UI window properties
     page.title = "Codex Query"
     page.padding = 16
     page.scroll = ft.ScrollMode.AUTO
     page.theme_mode = ft.ThemeMode.SYSTEM
+    page.on_error = lambda e: logger.error("Flet error: %s", e.data)
 
     async def pick_directory(e: ft.Event[ft.IconButton]) -> None:
         path = await directory_picker.get_directory_path(
@@ -75,7 +80,8 @@ async def _main(page: ft.Page) -> None:
             )
             if len(log_view.controls) > 300:
                 del log_view.controls[:-300]
-            page.update()
+
+            update_controls([phase, progress_bar, counters, log_view])
 
     async def run_index(e: ft.Event[ft.Button]) -> None:
         event_queue: Queue[ProgressEvent] = Queue()
@@ -89,7 +95,6 @@ async def _main(page: ft.Page) -> None:
             settings = Settings.from_data_dir(
                 Path(data_field.value or ".codex-query"), get_ollama_base_url()
             )
-            configure_logging(log_file=settings.data_dir / "codex-query.log")
 
             def report(event: ProgressEvent) -> None:
                 event_queue.put(event)
@@ -132,7 +137,6 @@ async def _main(page: ft.Page) -> None:
             settings = Settings.from_data_dir(
                 Path(data_field.value or ".codex-query"), get_ollama_base_url()
             )
-            configure_logging(log_file=settings.data_dir / "codex-query.log")
 
             def report(event: ProgressEvent) -> None:
                 queue.put(event)
@@ -191,6 +195,7 @@ async def _main(page: ft.Page) -> None:
 
 def main() -> None:
     """Application entry point to launch the Flet UI."""
+    configure_logging()
     ft.run(_main)
 
 
