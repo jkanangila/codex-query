@@ -1,246 +1,505 @@
-"""Module for managing application settings stored in JSON format with
-Fernet encryption."""
+"""Persist non-secret application settings as JSON.
 
-import base64
-import hashlib
+API keys are NOT stored here (see `ApiKeyRepositoryPort`). Files written by older
+versions (flat layout with an encrypted `api_key`) are migrated on load: the
+decrypted key is handed back on `settings.chat/embedding.api_key` so that
+`SettingsService.load` can move it into the key store and rewrite this file.
+"""
+
 import json
-import os
 import tempfile
-from dataclasses import asdict
+from collections.abc import Mapping
 from pathlib import Path
-from typing import Any
+from typing import Final, cast, override
 
-from cryptography.fernet import Fernet, InvalidToken
-from platformdirs import user_config_dir
-
-from codex_query.domain.models.provider import LLMProvider
-from codex_query.domain.models.settings import PresetMode, Settings
+from codex_query.application.ports.indexing import SettingsRepositoryPort
+from codex_query.domain.models.provider import (
+    CHAT_PROVIDER_CONFIGS,
+    EMBEDDING_PROVIDER_CONFIGS,
+    EndpointConfig,
+    LLMProvider,
+)
+from codex_query.domain.models.settings import PresetMode, ServiceSettings, Settings
 from codex_query.infrastructure.logging.factory import create_logger
-from codex_query.infrastructure.security.keys import get_or_create_secret_key
+from codex_query.infrastructure.paths import AppPaths
+from codex_query.infrastructure.security.cipher import (
+    SecretCipher,
+    SecretDecryptionError,
+)
 
 logger = create_logger(__name__)
 
+SCHEMA_VERSION: Final = 2
+_FERNET_PREFIX: Final = "gAAAA"  # every Fernet token starts with this
+
+type Json = Mapping[str, object]
+
 
 def settings_path() -> Path:
-    """Resolve the filesystem path for storing application settings JSON.
-
-    Determines the path using environment variables `APP_NAME` and
-    `FLET_APP_STORAGE_DATA`, falling back to platform-specific user config directories.
+    """Resolve the path of `settings.json` (same location as before).
 
     Returns:
-        Path: The fully resolved destination path for `settings.json`.
+        Path: The absolute filesystem path to the `settings.json` file.
     """
-    app_name = os.getenv("APP_NAME", "codex_query")
-    base = os.getenv("FLET_APP_STORAGE_DATA", user_config_dir(app_name))
-    resolved_path = Path(base) / ".settings" / "settings.json"
-    logger.debug("Resolved settings file path: %s", resolved_path)
-    return resolved_path
+    path = AppPaths.app_storage_data_dir() / ".settings" / "settings.json"
+    logger.debug("Resolved settings path to: %s", path)
+    return path
 
 
-class JsonSettingsRepository:
-    """Repository for persisting and loading application settings to/from JSON.
+def _as_mapping(value: object) -> Json:
+    """Safely convert an unknown object into a mapping dictionary.
 
-    Handles transparent field-level encryption for sensitive properties (e.g., API keys)
-    and atomic file writes to prevent configuration corruption.
+    Args:
+        value: Raw data object to inspect.
+
+    Returns:
+        Json: A dictionary mapping if valid, or an empty dictionary fallback.
     """
+    if isinstance(value, dict):
+        return cast("Json", value)
+    logger.debug(
+        "Expected dict mapping but received %s; falling back to empty dict",
+        type(value).__name__,
+    )
+    return {}
+
+
+def _str(data: Json, key: str, default: str) -> str:
+    """Extract a string value from a JSON dictionary with fallback.
+
+    Args:
+        data: Source mapping dictionary.
+        key: Dictionary key to lookup.
+        default: Fallback string value if key is missing or invalid.
+
+    Returns:
+        str: Extracted string value or fallback default.
+    """
+    value = data.get(key)
+    if isinstance(value, str):
+        return value
+    if key in data:
+        logger.debug(
+            "Invalid type for key '%s': expected str, got %s. Using default: %r",
+            key,
+            type(value).__name__,
+            default,
+        )
+    return default
+
+
+def _int(data: Json, key: str, default: int) -> int:
+    """Extract an integer value from a JSON dictionary with fallback.
+
+    Ensures booleans are explicitly rejected since bool inherits from int in Python.
+
+    Args:
+        data: Source mapping dictionary.
+        key: Dictionary key to lookup.
+        default: Fallback integer value if key is missing or invalid.
+
+    Returns:
+        int: Extracted integer value or fallback default.
+    """
+    value = data.get(key)
+    if isinstance(value, int) and not isinstance(value, bool):
+        return value
+    if key in data:
+        logger.debug(
+            "Invalid type for key '%s': expected int, got %s. Using default: %r",
+            key,
+            type(value).__name__,
+            default,
+        )
+    return default
+
+
+def _float(data: Json, key: str, default: float) -> float:
+    """Extract a float value from a JSON dictionary with fallback.
+
+    Args:
+        data: Source mapping dictionary.
+        key: Dictionary key to lookup.
+        default: Fallback float value if key is missing or invalid.
+
+    Returns:
+        float: Extracted float value or fallback default.
+    """
+    value = data.get(key)
+    if isinstance(value, int | float) and not isinstance(value, bool):
+        return float(value)
+    if key in data:
+        logger.debug(
+            "Invalid type for key '%s': expected float, got %s. Using default: %r",
+            key,
+            type(value).__name__,
+            default,
+        )
+    return default
+
+
+def _provider(
+    data: Json,
+    key: str,
+    configs: Mapping[LLMProvider, EndpointConfig],
+    default: LLMProvider,
+) -> LLMProvider:
+    """Extract and validate an LLMProvider enum from JSON data.
+
+    Args:
+        data: Source mapping dictionary.
+        key: Dictionary key holding the provider string.
+        configs: Mapping of valid endpoint configurations to check support.
+        default: Fallback LLMProvider enum value.
+
+    Returns:
+        LLMProvider: Validated provider enum or default fallback.
+    """
+    raw = data.get(key)
+    if isinstance(raw, str):
+        try:
+            candidate = LLMProvider(raw)
+        except ValueError:
+            logger.warning(
+                "Unknown provider '%s' specified for key '%s'; using default '%s'",
+                raw,
+                key,
+                default.value,
+            )
+            return default
+
+        if candidate in configs:
+            return candidate
+
+        logger.warning(
+            "Provider '%s' is not supported in given configs; using default '%s'",
+            candidate.value,
+            default.value,
+        )
+    elif key in data:
+        logger.debug(
+            "Invalid provider key '%s' type: %s; using default '%s'",
+            key,
+            type(raw).__name__,
+            default.value,
+        )
+    return default
+
+
+def _preset(data: Json, default: PresetMode) -> PresetMode:
+    """Extract and validate PresetMode enum from JSON data.
+
+    Args:
+        data: Source mapping dictionary.
+        default: Fallback PresetMode enum value.
+
+    Returns:
+        PresetMode: Validated preset mode enum or default fallback.
+    """
+    raw = data.get("preset_mode")
+    if isinstance(raw, str):
+        try:
+            return PresetMode(raw)
+        except ValueError:
+            logger.warning(
+                "Unknown preset_mode '%s'; using default '%s'",
+                raw,
+                default.value,
+            )
+            return default
+    elif "preset_mode" in data:
+        logger.debug(
+            "Invalid preset_mode type: %s; using default '%s'",
+            type(raw).__name__,
+            default.value,
+        )
+    return default
+
+
+def _service_from_dict(
+    raw: object,
+    configs: Mapping[LLMProvider, EndpointConfig],
+    fallback: ServiceSettings,
+) -> ServiceSettings:
+    """Parse raw dictionary data into a ServiceSettings instance.
+
+    Args:
+        raw: Raw unparsed service dictionary object.
+        configs: Mapping of endpoint configurations to fall back to for base URL/model.
+        fallback: Fallback ServiceSettings instance used for default values.
+
+    Returns:
+        ServiceSettings: Parsed service settings configuration.
+    """
+    data = _as_mapping(raw)
+    provider = _provider(data, "provider", configs, fallback.provider)
+    defaults = configs[provider]
+
+    base_url = _str(data, "base_url", "") or defaults.base_url
+    model = _str(data, "model", "") or defaults.default_model
+
+    logger.debug(
+        "Parsed service settings for provider '%s' (model: %s)",
+        provider.value,
+        model,
+    )
+    return ServiceSettings(
+        provider=provider,
+        base_url=base_url,
+        model=model,
+    )
+
+
+def _service_to_dict(service: ServiceSettings) -> dict[str, object]:
+    """Serialize ServiceSettings instance into a standard dictionary.
+
+    API keys are deliberately excluded from serialized output.
+
+    Args:
+        service: ServiceSettings instance to serialize.
+
+    Returns:
+        dict[str, object]: Serialized JSON-compatible dictionary.
+    """
+    logger.debug(
+        "Serializing service settings for provider '%s'", service.provider.value
+    )
+    return {
+        "provider": service.provider.value,
+        "base_url": service.base_url,
+        "model": service.model,
+    }
+
+
+def _to_dict(settings: Settings) -> dict[str, object]:
+    """Serialize full Settings domain model into a JSON-compatible dictionary.
+
+    Args:
+        settings: Settings instance to serialize.
+
+    Returns:
+        dict[str, object]: Dictionary representation matching standard schema.
+    """
+    logger.debug("Serializing Settings object to dictionary (v%d)", SCHEMA_VERSION)
+    return {
+        "version": SCHEMA_VERSION,
+        "chat": _service_to_dict(settings.chat),
+        "embedding": _service_to_dict(settings.embedding),
+        "preset_mode": settings.preset_mode.value,
+        "temperature": settings.temperature,
+        "max_tokens": settings.max_tokens,
+        "top_k": settings.top_k,
+        "num_ctx": settings.num_ctx,
+        "chunk_size": settings.chunk_size,
+    }
+
+
+def _from_current(data: Json) -> Settings:
+    """Parse schema v2 JSON mapping into a Settings object.
+
+    Args:
+        data: Source mapping dictionary following schema v2.
+
+    Returns:
+        Settings: Instantiated Settings object.
+    """
+    logger.debug("Parsing current schema v2 settings payload")
+    d = Settings()
+    return Settings(
+        chat=_service_from_dict(data.get("chat"), CHAT_PROVIDER_CONFIGS, d.chat),
+        embedding=_service_from_dict(
+            data.get("embedding"), EMBEDDING_PROVIDER_CONFIGS, d.embedding
+        ),
+        preset_mode=_preset(data, d.preset_mode),
+        temperature=_float(data, "temperature", d.temperature),
+        max_tokens=_int(data, "max_tokens", d.max_tokens),
+        top_k=_int(data, "top_k", d.top_k),
+        num_ctx=_int(data, "num_ctx", d.num_ctx),
+        chunk_size=_int(data, "chunk_size", d.chunk_size),
+    )
+
+
+def _legacy_url(provider: LLMProvider, url: str) -> str:
+    """Sanitize legacy base URLs according to provider constraints.
+
+    Ollama is now called via its native API, so trailing '/v1' path segments are removed
+
+    Args:
+        provider: Target LLMProvider enum.
+        url: Raw base URL string.
+
+    Returns:
+        str: Sanitized base URL string.
+    """
+    if provider is LLMProvider.OLLAMA:
+        cleaned = url.rstrip("/").removesuffix("/v1")
+        if cleaned != url:
+            logger.debug(
+                "Stripped '/v1' suffix from legacy Ollama URL: %s -> %s", url, cleaned
+            )
+        return cleaned
+    return url
+
+
+class JsonSettingsRepository(SettingsRepositoryPort):
+    """Implements `SettingsRepositoryPort` with atomic JSON file persistence."""
 
     def __init__(
         self,
         file_path: Path | None = None,
-        secret_key: bytes | str | None = None,
+        legacy_cipher: SecretCipher | None = None,
     ) -> None:
-        """Initialize the JsonSettingsRepository instance.
+        """Initialize repository with target file path and optional legacy cipher.
 
         Args:
-            file_path: Optional custom path to the settings file.
-                Defaults to `settings_path()`.
-            secret_key: Optional secret key for Fernet encryption. If omitted, fetches
-                or generates a default key via `get_or_create_secret_key()`.
+            file_path: Target JSON file path. Defaults to `settings_path()`.
+            legacy_cipher: Optional SecretCipher required to decrypt API keys
+                from legacy configuration files.
         """
-        self.file_path = file_path or settings_path()
-        logger.debug(
-            "Initializing JsonSettingsRepository with file path: %s", self.file_path
-        )
+        self._file_path = file_path or settings_path()
+        self._legacy_cipher = legacy_cipher
 
-        resolved_key = secret_key or get_or_create_secret_key()
-        self._fernet: Fernet | None = self._init_fernet(resolved_key)
-
-    def _init_fernet(self, secret_key: bytes | str | None) -> Fernet | None:
-        """Initialize the Fernet encryption cipher using a provided key.
-
-        Args:
-            secret_key: The secret key as a string or byte sequence.
-
-        Returns:
-            Fernet | None: Configured Fernet cipher instance, or None if key is missing.
-        """
-        if not secret_key:
-            logger.warning(
-                "No secret key provided; secret encryption/decryption disabled."
-            )
-            return None
-
-        key_bytes = (
-            secret_key.encode("utf-8") if isinstance(secret_key, str) else secret_key
-        )
-
-        if len(key_bytes) == 44 and key_bytes.endswith(b"="):
-            try:
-                if len(base64.urlsafe_b64decode(key_bytes)) == 32:
-                    logger.debug("Successfully validated 32-byte URL-safe base64 key.")
-                    return Fernet(key_bytes)
-            except Exception:
-                logger.exception(
-                    "Failed base64 validation for existing key; "
-                    "falling back to SHA-256 derivation."
-                )
-
-        logger.debug("Deriving Fernet encryption key via SHA-256 digest.")
-        derived_key = base64.urlsafe_b64encode(hashlib.sha256(key_bytes).digest())
-        return Fernet(derived_key)
-
-    def encrypt_secret(self, secret: str) -> str:
-        """Encrypt a plain text secret string using Fernet cipher.
-
-        Args:
-            secret: Plain text value to encrypt.
-
-        Returns:
-            str: Ciphertext string if encryption succeeds;
-                otherwise, the original string.
-        """
-        if not self._fernet:
-            logger.debug("Encryption skipped: Fernet cipher is not initialized.")
-            return secret
-        if not secret:
-            logger.debug("Encryption skipped: Plaintext secret is empty.")
-            return secret
-
-        try:
-            encrypted = self._fernet.encrypt(secret.encode("utf-8")).decode("utf-8")
-            logger.debug("Successfully encrypted secret field.")
-            return encrypted
-        except Exception:
-            logger.exception("Unexpected error encountered during secret encryption.")
-            raise
-
-    def decrypt_secret(self, cipher_text: str) -> str:
-        """Decrypt a Fernet ciphertext secret string.
-
-        Args:
-            cipher_text: Encrypted string to decrypt.
-
-        Returns:
-            str: Decrypted plaintext string, or raw `cipher_text`
-                on failure/unencrypted input.
-        """
-        if not self._fernet:
-            logger.debug("Decryption skipped: Fernet cipher is not initialized.")
-            return cipher_text
-        if not cipher_text:
-            logger.debug("Decryption skipped: Ciphertext value is empty.")
-            return cipher_text
-
-        try:
-            decrypted = self._fernet.decrypt(cipher_text.encode("utf-8")).decode(
-                "utf-8"
-            )
-            logger.debug("Successfully decrypted secret field.")
-            return decrypted
-        except (InvalidToken, TypeError, ValueError):
-            logger.exception(
-                "Failed to decrypt secret field. Returning unencrypted raw value."
-            )
-            return cipher_text
-
+    @override
     def load(self) -> Settings | None:
-        """Load settings configuration from the JSON file on disk.
+        """Load settings from the JSON file.
+
+        Handles missing files, unparsable JSON content, and legacy migration.
 
         Returns:
-            Settings | None: Populated `Settings` instance if file exists and parses
-            successfully; `None` on file missing or parse errors.
+            Settings | None: Parsed Settings object, or None if reading fails or
+                file does not exist.
         """
-        logger.info("Attempting to load settings from %s", self.file_path)
-
-        if not self.file_path.exists():
-            logger.info(
-                "Settings file does not exist at %s. Returning default state.",
-                self.file_path,
-            )
+        if not self._file_path.exists():
+            logger.info("No settings file at %s; using defaults", self._file_path)
             return None
 
+        logger.debug("Loading settings from %s", self._file_path)
         try:
-            with open(self.file_path, encoding="utf-8") as f:
-                data: dict[str, Any] = json.load(f)
-
-            if isinstance(data.get("api_key"), str):
-                data["api_key"] = self.decrypt_secret(data["api_key"])
-
-            # Map primitive string values back into Domain Enums
-            if "preset_mode" in data and data["preset_mode"] is not None:
-                data["preset_mode"] = PresetMode(data["preset_mode"])
-
-            if "provider" in data and data["provider"] is not None:
-                data["provider"] = LLMProvider(data["provider"])
-
-            settings = Settings(**data)
-            logger.info("Successfully loaded settings from %s", self.file_path)
-            return settings
-        except (json.JSONDecodeError, KeyError, ValueError, OSError):
-            logger.exception(
-                "Failed to load or parse settings from %s. Falling back to defaults.",
-                self.file_path,
-            )
+            raw: object = json.loads(self._file_path.read_text(encoding="utf-8"))
+        except (json.JSONDecodeError, OSError):
+            logger.exception("Could not read settings from %s", self._file_path)
             return None
 
+        data = _as_mapping(raw)
+        if "version" not in data:
+            logger.info("Migrating pre-v2 settings file at %s", self._file_path)
+            return self._from_legacy(data)
+
+        logger.debug("Successfully loaded schema v%s settings", data.get("version"))
+        return _from_current(data)
+
+    @override
     def save(self, settings: Settings) -> None:
         """Persist settings to disk atomically using a temporary file.
 
         Args:
-            settings: The `Settings` object instance to persist.
+            settings: Settings object instance to persist.
 
         Raises:
-            Exception: Re-raises filesystem or serialization exceptions after logging.
+            Exception: Re-raises any underlying I/O or serialization error.
         """
-        logger.info("Saving settings to %s", self.file_path)
+        logger.debug("Preparing to write settings to %s", self._file_path)
+        self._file_path.parent.mkdir(parents=True, exist_ok=True)
+        temp_path: Path | None = None
+        try:
+            with tempfile.NamedTemporaryFile(
+                "w",
+                dir=self._file_path.parent,
+                suffix=".tmp",
+                delete=False,
+                encoding="utf-8",
+            ) as handle:
+                temp_path = Path(handle.name)
+                json.dump(_to_dict(settings), handle, indent=2)
+
+            temp_path.replace(self._file_path)  # atomic on the same filesystem
+        except Exception:
+            if temp_path is not None:
+                temp_path.unlink(missing_ok=True)
+            logger.exception("Failed to save settings to %s", self._file_path)
+            raise
+
+        logger.info("Saved settings to %s", self._file_path)
+
+    # --- legacy (flat) layout -------------------------------------------------
+
+    def _from_legacy(self, data: Json) -> Settings:
+        """Migrate flat pre-v2 settings schema mapping to current Settings domain.
+
+        Args:
+            data: Raw legacy settings JSON dictionary mapping.
+
+        Returns:
+            Settings: Migrated Settings instance.
+        """
+        logger.debug("Executing legacy settings migration")
+        d = Settings()
+        provider = _provider(
+            data, "provider", CHAT_PROVIDER_CONFIGS, LLMProvider.OLLAMA
+        )
+        url = _legacy_url(provider, _str(data, "base_url", ""))
+        api_key = self._decrypt_legacy_key(_str(data, "api_key", ""))
+
+        chat_cfg = CHAT_PROVIDER_CONFIGS[provider]
+        chat = ServiceSettings(
+            provider=provider,
+            base_url=url or chat_cfg.base_url,
+            api_key=api_key,
+            model=_str(data, "chat_model", "") or chat_cfg.default_model,
+        )
+
+        # The old single provider also did embeddings, unless it can't (Anthropic).
+        shared = provider in EMBEDDING_PROVIDER_CONFIGS
+        embed_provider = provider if shared else LLMProvider.OLLAMA
+        embed_cfg = EMBEDDING_PROVIDER_CONFIGS[embed_provider]
+        embedding = ServiceSettings(
+            provider=embed_provider,
+            base_url=(url if shared else "") or embed_cfg.base_url,
+            api_key=api_key if shared else "",
+            model=_str(data, "embed_model", "") or embed_cfg.default_model,
+        )
+
+        logger.info(
+            "Migrated legacy settings (chat_provider=%s, embed_provider=%s)",
+            provider.value,
+            embed_provider.value,
+        )
+        return Settings(
+            chat=chat,
+            embedding=embedding,
+            preset_mode=_preset(data, d.preset_mode),
+            temperature=_float(data, "temperature", d.temperature),
+            max_tokens=_int(data, "max_tokens", d.max_tokens),
+            top_k=_int(data, "top_k", d.top_k),
+            num_ctx=_int(data, "num_ctx", d.num_ctx),
+            chunk_size=_int(data, "chunk_size", d.chunk_size),
+        )
+
+    def _decrypt_legacy_key(self, value: str) -> str:
+        """Attempt decryption of legacy API key tokens.
+
+        Args:
+            value: Raw string from legacy configuration.
+
+        Returns:
+            str: Decrypted plaintext API key string, or empty string on
+                error/missing key.
+        """
+        if not value:
+            return ""
+
+        if not value.startswith(_FERNET_PREFIX):
+            logger.debug("Legacy API key is unencrypted plaintext")
+            return value  # old code stored plaintext when encryption was off
+
+        if self._legacy_cipher is None:
+            logger.warning("Legacy API key found but no cipher given; dropping it")
+            return ""
 
         try:
-            self.file_path.parent.mkdir(parents=True, exist_ok=True)
-            data = asdict(settings)
-
-            if isinstance(data.get("api_key"), str):
-                data["api_key"] = self.encrypt_secret(data["api_key"])
-
-            # Convert Enum attributes to string values for JSON serialization safety
-            data["preset_mode"] = settings.preset_mode.value
-            data["provider"] = settings.provider.value
-
-            temp_dir = self.file_path.parent
-            temp_file_path: Path | None = None
-
-            try:
-                with tempfile.NamedTemporaryFile(
-                    "w", dir=temp_dir, delete=False, encoding="utf-8"
-                ) as temp_file:
-                    json.dump(data, temp_file, indent=2, default=str)
-                    temp_file_path = Path(temp_file.name)
-
-                temp_file_path.replace(self.file_path)
-                logger.info("Successfully persisted settings to %s", self.file_path)
-            finally:
-                if (
-                    temp_file_path
-                    and temp_file_path.exists()
-                    and temp_file_path != self.file_path
-                ):
-                    try:
-                        temp_file_path.unlink()
-                        logger.debug("Cleaned up temporary file %s", temp_file_path)
-                    except OSError:
-                        logger.exception(
-                            "Failed to clean up temporary file %s", temp_file_path
-                        )
-
-        except Exception:
-            logger.exception("Failed to save settings to %s", self.file_path)
-            raise
+            decrypted = self._legacy_cipher.decrypt(value)
+            logger.debug("Successfully decrypted legacy API key")
+            return decrypted
+        except SecretDecryptionError:
+            logger.warning("Legacy API key is unreadable; it must be re-entered")
+            return ""

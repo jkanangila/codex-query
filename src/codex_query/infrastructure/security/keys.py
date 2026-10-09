@@ -1,9 +1,14 @@
-"""Module for managing settings encryption keys via system keyring."""
+"""Master encryption key: system keyring first, protected file as fallback."""
+
+import contextlib
+import os
+from pathlib import Path
 
 import keyring
 from cryptography.fernet import Fernet
 
 from codex_query.infrastructure.logging.factory import create_logger
+from codex_query.infrastructure.paths import AppPaths
 
 SERVICE_NAME = "codex_query"
 KEY_ACCOUNT = "settings_encryption_key"
@@ -11,38 +16,55 @@ KEY_ACCOUNT = "settings_encryption_key"
 logger = create_logger(__name__)
 
 
-def get_or_create_secret_key() -> str:
-    """Retrieve the secret key from system keyring or generate and store a new one.
+def key_file_path() -> Path:
+    return AppPaths.app_storage_data_dir() / ".secrets" / "master.key"
 
-    Attempts to fetch an existing encryption key from the system keyring service.
-    If no key exists or if accessing the keyring fails (e.g., in headless or
-    container environments), a new Fernet-compatible key is generated.
+
+def _generate() -> str:
+    return Fernet.generate_key().decode("utf-8")
+
+
+def _get_or_create_file_key(new_key: str | None = None) -> str:
+    """Headless/container fallback. Only as safe as the file's permissions."""
+    path = key_file_path()
+    with contextlib.suppress(FileNotFoundError):
+        existing = path.read_text(encoding="utf-8").strip()
+        if existing:
+            return existing
+
+    key = new_key or _generate()
+    path.parent.mkdir(parents=True, exist_ok=True)
+    fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+    with os.fdopen(fd, "w", encoding="utf-8") as handle:
+        handle.write(key)
+    logger.warning("Master key stored in %s because no keyring is usable.", path)
+    return key
+
+
+def get_or_create_secret_key() -> str:
+    """Return the Fernet master key, creating and persisting it if needed.
+
+    Never generates a replacement key when the keyring merely *failed to read*:
+    that would orphan every secret already encrypted with the old key.
 
     Returns:
-        str: A 32-byte URL-safe base64-encoded key string suitable for Fernet.
+        A URL-safe base64 Fernet key.
     """
     try:
-        existing_key = keyring.get_password(SERVICE_NAME, KEY_ACCOUNT)
-        if existing_key:
-            logger.debug("Successfully retrieved encryption key from system keyring.")
-            return existing_key
-        logger.info("No existing encryption key found in system keyring.")
-    except Exception:
-        logger.exception(
-            "Failed to access system keyring during key retrieval; "
-            "falling back to key generation.",
-        )
+        existing = keyring.get_password(SERVICE_NAME, KEY_ACCOUNT)
+    except Exception as err:
+        logger.warning("Keyring unavailable (%s); using key file.", type(err).__name__)
+        return _get_or_create_file_key()
 
-    logger.info("Generating a new Fernet encryption key.")
-    new_key = Fernet.generate_key().decode("utf-8")
+    if existing:
+        return existing
 
+    new_key = _generate()
     try:
         keyring.set_password(SERVICE_NAME, KEY_ACCOUNT, new_key)
-        logger.info("Successfully stored new encryption key in system keyring.")
-    except Exception:
-        logger.exception(
-            "Failed to store new encryption key in system keyring. "
-            "Key will not persist across application restarts.",
-        )
+    except Exception as err:
+        logger.warning("Cannot write keyring (%s); using key file.", type(err).__name__)
+        return _get_or_create_file_key(new_key)
 
+    logger.info("Created a new master key in the system keyring.")
     return new_key
