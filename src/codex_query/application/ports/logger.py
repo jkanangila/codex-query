@@ -3,7 +3,7 @@ from __future__ import annotations
 from typing import Protocol
 
 
-class ILogger(Protocol):
+class LoggerRepositoryPort(Protocol):
     """Application-facing logging abstraction."""
 
     def debug(self, message: str, *args: object) -> None:
@@ -23,3 +23,7 @@ class ILogger(Protocol):
 
     def critical(self, message: str, *args: object) -> None:
         """Log a critical error."""
+
+
+class LoggerFactoryPort(Protocol):
+    def create(self, name: str) -> LoggerRepositoryPort: ...
