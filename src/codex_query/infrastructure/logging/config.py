@@ -9,7 +9,7 @@ from pathlib import Path
 from types import TracebackType
 from typing import Any, Final
 
-from platformdirs import user_log_dir
+from codex_query.infrastructure.paths import AppPaths
 
 from .json_formatter import JsonFormatter
 
@@ -20,16 +20,14 @@ log = logging.getLogger(__name__)
 
 
 def log_dir() -> Path:
-    app_name = os.environ.get("APP_NAME", "codex_query")
-    base = os.environ.get("FLET_APP_STORAGE_DATA", user_log_dir(app_name))
-    root = Path(base)
+    root = AppPaths.app_storage_data_dir()
     path = root / "logs"
     path.mkdir(parents=True, exist_ok=True)
     return path
 
 
 file_handler = logging.handlers.RotatingFileHandler(
-    log_dir() / "codex.log",
+    log_dir() / "codex.jsonl",
     maxBytes=1_000_000,
     backupCount=3,
     encoding="utf-8",
@@ -80,7 +78,7 @@ def _configure_production_logging(level: int | str = logging.INFO) -> None:
 
 def configure_logging() -> None:
     """Configure application-wide logging."""
-    level: int | str = os.getenv("LOG_LEVEL", "").upper()
+    level: int | str = os.getenv("LOG_LEVEL", "info").upper()
 
     try:
         assert level in logging._levelToName.values()  # pyright: ignore[reportPrivateUsage]

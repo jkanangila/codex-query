@@ -3,10 +3,10 @@ from __future__ import annotations
 import logging
 from typing import override
 
-from codex_query.application.ports.logger import ILogger
+from codex_query.application.ports.logger import LoggerRepositoryPort
 
 
-class PythonLogger(ILogger):
+class PythonLogger(LoggerRepositoryPort):
     """ILogger implementation backed by Python's logging package."""
 
     def __init__(self, logger: logging.Logger) -> None:
