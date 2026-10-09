@@ -1,3 +1,10 @@
+[build-system]
+requires = ["uv_build>=0.8,<0.9"]
+build-backend = "uv_build"
+
+# ------------------------------------------------------------------------------
+# Project Metadata
+# ------------------------------------------------------------------------------
 [project]
 name = "codex-query"
 version = "0.1.0"
@@ -5,24 +12,34 @@ description = "Offline EPUB RAG for private local book collections using ChromaD
 readme = "README.md"
 requires-python = ">=3.12"
 dependencies = [
+  # Database & ORM
   "aiosqlite>=0.22.1",
   "alembic>=1.20.0",
   "asyncpg>=0.31.0",
-  "beautifulsoup4>=4.13",
-  "chromadb>=1.1.0",
-  "click>=8.1",
-  "cryptography>=50.0.2",
-  "ebooklib>=0.18",
-  "flet>=0.80",
-  "keyring>=25.7.0",
-  "ollama>=0.6",
-  "platformdirs>=4.12.1",
-  "pydantic-settings>=2.15.0",
-  "questionary>=2.1",
-  "rich>=14.0",
   "sqlalchemy[asyncio]>=2.0.54",
   "sqlmodel>=0.0.47",
+
+  # Document & EPUB Parsing
+  "beautifulsoup4>=4.13",
+  "ebooklib>=0.18",
+
+  # Interface & UI
+  "click>=8.1",
+  "flet>=0.80",
+  "questionary>=2.1",
+  "rich>=14.0",
+
+  # Core Utilities, Networking & Security
+  "cryptography>=50.0.2",
+  "httpx>=0.28.1",
+  "keyring>=25.7.0",
+  "numpy>=2.5.3",
+  "platformdirs>=4.12.1",
+  "pydantic-settings>=2.15.0",
 ]
+
+[project.optional-dependencies]
+desktop = ["chromadb>=1.0"]
 
 [project.scripts]
 codex-query = "codex_query.presentation.cli:main"
@@ -30,30 +47,34 @@ codex-query-ui = "codex_query.presentation.ui:main"
 cli = "codex_query.presentation.cli:main"
 ui = "codex_query.presentation.ui:main"
 
+# ------------------------------------------------------------------------------
+# Dependency Groups
+# ------------------------------------------------------------------------------
 [dependency-groups]
 dev = [
+  # Testing
   "anyio>=4.15.1",
+  "faker>=40.41.0",
+  "pytest>=8.4",
+  "pytest-asyncio>=1.4.0",
+  "pytest-cov>=6.2",
+
+  # Linting & Type Checking
   "basedpyright>=1.31",
+  "ruff>=0.13",
+
+  # Interactive Development
   "ipykernel>=7.3.0",
   "jupyter-client>=8.10.0",
   "jupytext>=1.19.5",
   "pynvim>=0.6.0",
-  "pytest>=8.4",
-  "pytest-asyncio>=1.4.0",
-  "pytest-cov>=6.2",
-  "pytest-tornasync>=0.6.0.post2",
-  "pytest-trio>=0.8.0",
-  "pytest-twisted>=1.14.3",
-  "ruff>=0.13",
-  "twisted>=26.4.0",
 ]
 
+# ------------------------------------------------------------------------------
+# Tool Configurations
+# ------------------------------------------------------------------------------
 [tool.uv]
 default-groups = ["dev"]
-
-[build-system]
-requires = ["uv_build>=0.8,<0.9"]
-build-backend = "uv_build"
 
 [tool.uv.build-backend]
 module-name = "codex_query"
