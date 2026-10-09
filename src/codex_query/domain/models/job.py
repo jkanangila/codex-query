@@ -32,6 +32,11 @@ _ALLOWED: dict[JobStatus, frozenset[JobStatus]] = {
 }
 
 
+TERMINAL_STATUSES: frozenset[JobStatus] = frozenset(
+    {JobStatus.COMPLETED, JobStatus.CANCELLED}
+)  # add FAILED here if failed jobs ever stop being retryable
+
+
 class InvalidTransition(Exception): ...
 
 
@@ -78,4 +83,4 @@ class IndexingJob:
 
     @property
     def is_active(self) -> bool:
-        return self.status not in (JobStatus.COMPLETED, JobStatus.CANCELLED)
+        return self.status not in TERMINAL_STATUSES

@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-from collections.abc import Mapping
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -10,7 +9,7 @@ class Chapter:
     href: str
     title: str
     order: int
-    content: str
+    content: str | None
     content_hash: str
     id: int | None = None
     book_id: int | None = None
@@ -18,19 +17,18 @@ class Chapter:
 
 @dataclass
 class TextChunkMetadata:
-    series: str | None = None
-    book_id: int | None = None
-    book_title: str | None = None
-    chapter_href: str | None = None
-    chapter_title: str | None = None
-    chapter_order: int | None = None
-    chunk_index: int | None = None
+    series: str | None
+    book_id: int
+    book_title: str
+    chapter_href: str
+    chapter_title: str
+    chapter_order: int
+    chunk_index: int
 
 
 @dataclass(frozen=True, slots=True)
 class TextChunk:
     id: int | None
-    chunk_hash: str
     chapter_id: int
     series: str | None
     book_title: str
@@ -42,10 +40,10 @@ class TextChunk:
 
 @dataclass
 class BookMetaData:
-    chapter_count: int | None = None
     file_type: str | None = None
     genre: str | None = None
     year: str | None = None
+    chapter_count: int = 0
 
 
 @dataclass(frozen=True, slots=True)
@@ -70,17 +68,3 @@ class BookUpdate:
     size: int | None = None
     modified_ns: int | None = None
     meta: dict[str, str | int] = field(default_factory=dict)
-
-
-@dataclass(frozen=True, slots=True)
-class SearchHit:
-    text: str
-    distance: float
-    metadata: Mapping[str, object]
-
-
-@dataclass(frozen=True, slots=True)
-class Answer:
-    question: str
-    answer: str
-    sources: tuple[SearchHit, ...]

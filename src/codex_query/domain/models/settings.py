@@ -1,8 +1,16 @@
-from dataclasses import dataclass
+from collections.abc import Mapping
+from dataclasses import dataclass, field
 from enum import StrEnum
-from typing import Final, Protocol
+from typing import Final
 
-from codex_query.domain.models.provider import PROVIDER_CONFIGS, LLMProvider
+from codex_query.domain.errors import ProviderConfigurationError
+from codex_query.domain.models.chat import GenerationParams
+from codex_query.domain.models.provider import (
+    CHAT_PROVIDER_CONFIGS,
+    EMBEDDING_PROVIDER_CONFIGS,
+    EndpointConfig,
+    LLMProvider,
+)
 
 # Explicit constants for token estimation
 ESTIMATED_CHARS_PER_TOKEN: Final[int] = 4
@@ -32,17 +40,78 @@ PRESETS: dict[PresetMode, Preset] = {
 }
 
 
-class ProviderUrlResolver(Protocol):
-    def get_default_url(self, provider: LLMProvider) -> str: ...
+@dataclass(slots=True)
+class ServiceSettings:
+    """Provider, credentials and model for ONE capability (chat or embeddings)."""
+
+    provider: LLMProvider
+    base_url: str = ""
+    api_key: str = ""
+    model: str = ""
+
+    @classmethod
+    def for_provider(
+        cls, provider: LLMProvider, configs: Mapping[LLMProvider, EndpointConfig]
+    ) -> "ServiceSettings":
+        config = configs.get(provider)
+        if config is None:
+            msg = f"{provider.value} does not offer this service"
+            raise ProviderConfigurationError(msg)
+        return cls(provider, base_url=config.base_url, model=config.default_model)
+
+    def select_provider(
+        self,
+        new_provider: LLMProvider,
+        configs: Mapping[LLMProvider, EndpointConfig],
+    ) -> bool:
+        """Switch provider, carrying over only values the user customized.
+
+        Returns True when the base URL changed. Raises if `new_provider` does
+        not offer this service (e.g. Anthropic has no embeddings).
+        """
+        new_config = configs.get(new_provider)
+        if new_config is None:
+            msg = f"{new_provider.value} does not offer this service"
+            raise ProviderConfigurationError(msg)
+        old_config = configs.get(self.provider)
+
+        url_changed = False
+        # Replace the URL if empty or still pointing at the old provider's default.
+        if (
+            old_config is None
+            or not self.base_url
+            or self.base_url == old_config.base_url
+        ):
+            url_changed = self.base_url != new_config.base_url
+            self.base_url = new_config.base_url
+
+        if (
+            old_config is None
+            or not self.model
+            or self.model == old_config.default_model
+        ):
+            self.model = new_config.default_model
+
+        # A key is only valid for the vendor that issued it: never send it on.
+        if new_provider != self.provider:
+            self.api_key = ""
+
+        self.provider = new_provider
+        return url_changed
+
+
+def _default_chat() -> ServiceSettings:
+    return ServiceSettings.for_provider(LLMProvider.OLLAMA, CHAT_PROVIDER_CONFIGS)
+
+
+def _default_embedding() -> ServiceSettings:
+    return ServiceSettings.for_provider(LLMProvider.OLLAMA, EMBEDDING_PROVIDER_CONFIGS)
 
 
 @dataclass(slots=True)
 class Settings:
-    provider: LLMProvider = LLMProvider.OLLAMA
-    base_url: str = ""
-    api_key: str = ""
-    chat_model: str = "llama3.2:3b"
-    embed_model: str = "bge-m3"
+    chat: ServiceSettings = field(default_factory=_default_chat)
+    embedding: ServiceSettings = field(default_factory=_default_embedding)
     preset_mode: PresetMode = PresetMode.LOW
     temperature: float = 0.2
     max_tokens: int = 400
@@ -62,41 +131,18 @@ class Settings:
         else:
             self.preset_mode = PresetMode.CUSTOM
 
-    def select_provider(
-        self, new_provider: LLMProvider, resolver: ProviderUrlResolver
-    ) -> bool:
-        url_changed = False
-        default_for_new_provider = resolver.get_default_url(new_provider)
-        current_default_url = resolver.get_default_url(self.provider)
+    def select_chat_provider(self, provider: LLMProvider) -> bool:
+        return self.chat.select_provider(provider, CHAT_PROVIDER_CONFIGS)
 
-        # Update base URL if empty or currently pointing to previous provider's default
-        if not self.base_url or self.base_url == current_default_url:
-            url_changed = self.base_url != default_for_new_provider
-            self.base_url = default_for_new_provider
+    def select_embedding_provider(self, provider: LLMProvider) -> bool:
+        return self.embedding.select_provider(provider, EMBEDDING_PROVIDER_CONFIGS)
 
-        # Update model defaults for the new provider
-        if new_provider in PROVIDER_CONFIGS:
-            prev_defaults = PROVIDER_CONFIGS.get(self.provider, {}).get(
-                "default_models", {}
-            )
-            new_defaults = PROVIDER_CONFIGS[new_provider]["default_models"]
-
-            # Replace chat model if it matched previous provider's default or was empty
-            if not self.chat_model or self.chat_model == prev_defaults.get("chat"):
-                self.chat_model = new_defaults["chat"]
-
-            # Replace embedding model accordingly
-            if not self.embed_model or self.embed_model == prev_defaults.get(
-                "embeddings"
-            ):
-                self.embed_model = (
-                    new_defaults["embeddings"]
-                    if new_defaults["embeddings"] != "none"
-                    else ""
-                )
-
-        self.provider = new_provider
-        return url_changed
+    def generation_params(self) -> GenerationParams:
+        return GenerationParams(
+            temperature=self.temperature,
+            max_tokens=self.max_tokens,
+            num_ctx=self.num_ctx,
+        )
 
     def est_tokens(self) -> int:
         """Estimates context window token usage based on chunk size and model params."""
