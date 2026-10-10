@@ -7,7 +7,7 @@ import ebooklib
 from bs4 import BeautifulSoup
 from ebooklib import epub
 
-from codex_query.application.ports.indexing import IDocumentParser
+from codex_query.application.ports.indexing import DocumentParserPort
 from codex_query.domain.dtos.parsed_epub import ParsedDocumentDTO
 from codex_query.domain.models.document import Book, BookMetaData, Chapter
 from codex_query.infrastructure.logging.factory import create_logger
@@ -24,7 +24,7 @@ class InvalidPath(Exception):
 logger = create_logger(__name__)
 
 
-class EbookLibDocumentParser(IDocumentParser):
+class EbookLibDocumentParser(DocumentParserPort):
     """Parser implementation using EbookLib to extract metadata and chapters
     from EPUB files."""
 
