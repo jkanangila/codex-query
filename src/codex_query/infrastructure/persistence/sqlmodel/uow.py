@@ -5,24 +5,43 @@ from sqlalchemy.ext.asyncio import async_sessionmaker
 from sqlmodel.ext.asyncio.session import AsyncSession
 
 from codex_query.application.ports.unit_of_work import UnitOfWork
-from codex_query.infrastructure.persistence.sqlmodel.repositories.sqlmodel_book_repo import (
+from codex_query.infrastructure.persistence.sqlmodel.repositories.sqlmodel_api_keys_repo import (  # noqa: E501
+    SqlModelApiKeyRepository,
+)
+from codex_query.infrastructure.persistence.sqlmodel.repositories.sqlmodel_book_repo import (  # noqa: E501
     SqlModelBookRepository,
 )
-from codex_query.infrastructure.persistence.sqlmodel.repositories.sqlmodel_chapter_repo import (
+from codex_query.infrastructure.persistence.sqlmodel.repositories.sqlmodel_chapter_repo import (  # noqa: E501
     SqlModelChapterRepository,
 )
-from codex_query.infrastructure.persistence.sqlmodel.repositories.sqlmodel_chunk_repo import (
+from codex_query.infrastructure.persistence.sqlmodel.repositories.sqlmodel_chunk_repo import (  # noqa: E501
     SqlModelChunkRepository,
 )
-from codex_query.infrastructure.persistence.sqlmodel.repositories.sqlmodel_job_repo import (
+from codex_query.infrastructure.persistence.sqlmodel.repositories.sqlmodel_job_repo import (  # noqa: E501
     SqlModelIndexingJobRepository,
 )
+from codex_query.infrastructure.persistence.sqlmodel.repositories.sqlmodel_vector_store import (  # noqa: E501
+    SqlModelVectorStore,
+)
+from codex_query.infrastructure.persistence.vector_store_factory import (
+    VectorStoreFactory,
+)
+from codex_query.infrastructure.security.cipher import SecretCipher
 
 
 class SqlUnitOfWork(UnitOfWork):
-    def __init__(self, factory: async_sessionmaker[AsyncSession]) -> None:
+    def __init__(
+        self,
+        factory: async_sessionmaker[AsyncSession],
+        cipher: SecretCipher,
+        vector_store_factory: VectorStoreFactory | None = None,
+    ) -> None:
         self._factory = factory
         self._session: AsyncSession | None = None
+        self._cipher = cipher
+        # Default: SQLite + numpy in the same transaction. Pass a factory to swap
+        # in another backend (e.g. Chroma on desktop).
+        self._vector_store_factory = vector_store_factory or SqlModelVectorStore
 
     @property
     def session(self) -> AsyncSession:
@@ -37,6 +56,8 @@ class SqlUnitOfWork(UnitOfWork):
         self.chapters = SqlModelChapterRepository(self._session)
         self.chunks = SqlModelChunkRepository(self._session)
         self.jobs = SqlModelIndexingJobRepository(self._session)
+        self.api_keys = SqlModelApiKeyRepository(self._session, self._cipher)
+        self.vectors = self._vector_store_factory(self._session)
         return self
 
     @override
@@ -60,3 +81,20 @@ class SqlUnitOfWork(UnitOfWork):
     @override
     async def rollback(self) -> None:
         await self.session.rollback()
+
+
+class SqlReadOnlyUnitOfWork(SqlUnitOfWork):
+    """Unit of work on the read-only engine (see SQLModelDatabase).
+
+    Build it with `db.read_session_factory`. Use it for queries such as vector
+    search, listing the library or reading settings: it never waits for a writer
+    holding the write lock, and sees only committed data. Writes fail at the
+    database (`query_only`), and `commit()` is rejected so misuse is loud.
+    Use `SqlUnitOfWork` for anything that writes.
+    """
+
+    @override
+    async def commit(self) -> None:
+        raise RuntimeError(
+            "SqlReadOnlyUnitOfWork cannot commit; use SqlUnitOfWork for writes"
+        )
