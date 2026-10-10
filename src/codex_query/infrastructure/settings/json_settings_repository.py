@@ -1,9 +1,7 @@
 """Persist non-secret application settings as JSON.
 
-API keys are NOT stored here (see `ApiKeyRepositoryPort`). Files written by older
-versions (flat layout with an encrypted `api_key`) are migrated on load: the
-decrypted key is handed back on `settings.chat/embedding.api_key` so that
-`SettingsService.load` can move it into the key store and rewrite this file.
+API keys are NOT stored here (see `ApiKeyRepositoryPort`). Files without a schema
+version are ignored and defaults are used.
 """
 
 import json
@@ -22,15 +20,10 @@ from codex_query.domain.models.provider import (
 from codex_query.domain.models.settings import PresetMode, ServiceSettings, Settings
 from codex_query.infrastructure.logging.factory import create_logger
 from codex_query.infrastructure.paths import AppPaths
-from codex_query.infrastructure.security.cipher import (
-    SecretCipher,
-    SecretDecryptionError,
-)
 
 logger = create_logger(__name__)
 
 SCHEMA_VERSION: Final = 2
-_FERNET_PREFIX: Final = "gAAAA"  # every Fernet token starts with this
 
 type Json = Mapping[str, object]
 
@@ -319,51 +312,22 @@ def _from_current(data: Json) -> Settings:
     )
 
 
-def _legacy_url(provider: LLMProvider, url: str) -> str:
-    """Sanitize legacy base URLs according to provider constraints.
-
-    Ollama is now called via its native API, so trailing '/v1' path segments are removed
-
-    Args:
-        provider: Target LLMProvider enum.
-        url: Raw base URL string.
-
-    Returns:
-        str: Sanitized base URL string.
-    """
-    if provider is LLMProvider.OLLAMA:
-        cleaned = url.rstrip("/").removesuffix("/v1")
-        if cleaned != url:
-            logger.debug(
-                "Stripped '/v1' suffix from legacy Ollama URL: %s -> %s", url, cleaned
-            )
-        return cleaned
-    return url
-
-
 class JsonSettingsRepository(SettingsRepositoryPort):
     """Implements `SettingsRepositoryPort` with atomic JSON file persistence."""
 
-    def __init__(
-        self,
-        file_path: Path | None = None,
-        legacy_cipher: SecretCipher | None = None,
-    ) -> None:
-        """Initialize repository with target file path and optional legacy cipher.
+    def __init__(self, file_path: Path | None = None) -> None:
+        """Initialize repository with target file path.
 
         Args:
             file_path: Target JSON file path. Defaults to `settings_path()`.
-            legacy_cipher: Optional SecretCipher required to decrypt API keys
-                from legacy configuration files.
         """
         self._file_path = file_path or settings_path()
-        self._legacy_cipher = legacy_cipher
 
     @override
     def load(self) -> Settings | None:
         """Load settings from the JSON file.
 
-        Handles missing files, unparsable JSON content, and legacy migration.
+        Handles missing files, unparsable JSON content, and unversioned files.
 
         Returns:
             Settings | None: Parsed Settings object, or None if reading fails or
@@ -382,8 +346,8 @@ class JsonSettingsRepository(SettingsRepositoryPort):
 
         data = _as_mapping(raw)
         if "version" not in data:
-            logger.info("Migrating pre-v2 settings file at %s", self._file_path)
-            return self._from_legacy(data)
+            logger.info("Ignoring unversioned settings file at %s", self._file_path)
+            return None
 
         logger.debug("Successfully loaded schema v%s settings", data.get("version"))
         return _from_current(data)
@@ -420,86 +384,3 @@ class JsonSettingsRepository(SettingsRepositoryPort):
             raise
 
         logger.info("Saved settings to %s", self._file_path)
-
-    # --- legacy (flat) layout -------------------------------------------------
-
-    def _from_legacy(self, data: Json) -> Settings:
-        """Migrate flat pre-v2 settings schema mapping to current Settings domain.
-
-        Args:
-            data: Raw legacy settings JSON dictionary mapping.
-
-        Returns:
-            Settings: Migrated Settings instance.
-        """
-        logger.debug("Executing legacy settings migration")
-        d = Settings()
-        provider = _provider(
-            data, "provider", CHAT_PROVIDER_CONFIGS, LLMProvider.OLLAMA
-        )
-        url = _legacy_url(provider, _str(data, "base_url", ""))
-        api_key = self._decrypt_legacy_key(_str(data, "api_key", ""))
-
-        chat_cfg = CHAT_PROVIDER_CONFIGS[provider]
-        chat = ServiceSettings(
-            provider=provider,
-            base_url=url or chat_cfg.base_url,
-            api_key=api_key,
-            model=_str(data, "chat_model", "") or chat_cfg.default_model,
-        )
-
-        # The old single provider also did embeddings, unless it can't (Anthropic).
-        shared = provider in EMBEDDING_PROVIDER_CONFIGS
-        embed_provider = provider if shared else LLMProvider.OLLAMA
-        embed_cfg = EMBEDDING_PROVIDER_CONFIGS[embed_provider]
-        embedding = ServiceSettings(
-            provider=embed_provider,
-            base_url=(url if shared else "") or embed_cfg.base_url,
-            api_key=api_key if shared else "",
-            model=_str(data, "embed_model", "") or embed_cfg.default_model,
-        )
-
-        logger.info(
-            "Migrated legacy settings (chat_provider=%s, embed_provider=%s)",
-            provider.value,
-            embed_provider.value,
-        )
-        return Settings(
-            chat=chat,
-            embedding=embedding,
-            preset_mode=_preset(data, d.preset_mode),
-            temperature=_float(data, "temperature", d.temperature),
-            max_tokens=_int(data, "max_tokens", d.max_tokens),
-            top_k=_int(data, "top_k", d.top_k),
-            num_ctx=_int(data, "num_ctx", d.num_ctx),
-            chunk_size=_int(data, "chunk_size", d.chunk_size),
-        )
-
-    def _decrypt_legacy_key(self, value: str) -> str:
-        """Attempt decryption of legacy API key tokens.
-
-        Args:
-            value: Raw string from legacy configuration.
-
-        Returns:
-            str: Decrypted plaintext API key string, or empty string on
-                error/missing key.
-        """
-        if not value:
-            return ""
-
-        if not value.startswith(_FERNET_PREFIX):
-            logger.debug("Legacy API key is unencrypted plaintext")
-            return value  # old code stored plaintext when encryption was off
-
-        if self._legacy_cipher is None:
-            logger.warning("Legacy API key found but no cipher given; dropping it")
-            return ""
-
-        try:
-            decrypted = self._legacy_cipher.decrypt(value)
-            logger.debug("Successfully decrypted legacy API key")
-            return decrypted
-        except SecretDecryptionError:
-            logger.warning("Legacy API key is unreadable; it must be re-entered")
-            return ""
