@@ -1,8 +1,10 @@
 from dataclasses import dataclass
 from functools import partial
 
+import flet_secure_storage as fss
 import httpx
 
+from codex_query.application.ports.api_keys import ApiKeyRepositoryPort
 from codex_query.application.ports.chat import ChatPort
 from codex_query.application.ports.embeddings import EmbeddingPort
 from codex_query.application.ports.indexing import (
@@ -33,8 +35,9 @@ from codex_query.infrastructure.persistence.vector_store_factory import (
     backend_for_platform,
     build_vector_store_factory,
 )
-from codex_query.infrastructure.security.cipher import SecretCipher
-from codex_query.infrastructure.security.keys import get_or_create_secret_key
+from codex_query.infrastructure.security.secure_storage_api_keys import (
+    SecureStorageApiKeyRepository,
+)
 from codex_query.infrastructure.settings.json_settings_repository import (
     JsonSettingsRepository,
 )
@@ -70,8 +73,11 @@ async def build_composition_root(platform: str) -> ApplicationContainer:
     # --------------------------------------------------------------------------
     configure_logging()
     logger_factory: LoggerFactoryPort = PythonLoggerFactory()
-    master_key = get_or_create_secret_key()
-    secret_cipher = SecretCipher(key=master_key)
+
+    storage = fss.SecureStorage()
+    api_keys_repository: ApiKeyRepositoryPort = SecureStorageApiKeyRepository(
+        storage=storage
+    )
 
     # --------------------------------------------------------------------------
     # Database & Persistence (SQL + Vector)
@@ -85,13 +91,11 @@ async def build_composition_root(platform: str) -> ApplicationContainer:
     uow_factory: UnitOfWorkFactory = partial(
         SqlUnitOfWork,
         database.session_factory,
-        secret_cipher,
         vector_store_factory,
     )
     read_only_uow_factory: UnitOfWorkFactory = partial(
         SqlReadOnlyUnitOfWork,
         database.session_factory,
-        secret_cipher,
         vector_store_factory,
     )
 
@@ -104,9 +108,8 @@ async def build_composition_root(platform: str) -> ApplicationContainer:
     settings_repository: SettingsRepositoryPort = JsonSettingsRepository()
     settings_service = SettingsService(
         settings_repo=settings_repository,
-        uow_factory=uow_factory,
-        read_only_uow_factory=read_only_uow_factory,
         logger_factory=logger_factory,
+        api_keys=api_keys_repository,
     )
     settings = await settings_service.load()
 

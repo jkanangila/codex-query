@@ -1,8 +1,8 @@
-"""Joins non-secret settings (JSON) with API keys (encrypted sqlite)."""
+"""Joins non-secret settings (JSON) with API keys (platform secure storage)."""
 
+from codex_query.application.ports.api_keys import ApiKeyRepositoryPort
 from codex_query.application.ports.indexing import SettingsRepositoryPort
 from codex_query.application.ports.logger import LoggerFactoryPort
-from codex_query.application.ports.unit_of_work import UnitOfWorkFactory
 from codex_query.domain.errors import ProviderConfigurationError
 from codex_query.domain.models.api_key import ApiKey
 from codex_query.domain.models.provider import LLMProvider
@@ -10,48 +10,41 @@ from codex_query.domain.models.settings import ServiceSettings, Settings
 
 
 class SettingsService:
-    """Manages application settings and API key persistence/migration."""
+    """Manages application settings and API key persistence."""
 
     def __init__(
         self,
         settings_repo: SettingsRepositoryPort,
-        uow_factory: UnitOfWorkFactory,
-        read_only_uow_factory: UnitOfWorkFactory,
+        api_keys: ApiKeyRepositoryPort,
         logger_factory: LoggerFactoryPort,
     ) -> None:
         """Initialize the settings service with required ports.
 
         Args:
             settings_repo: Port for persisting and loading application settings.
-            uow_factory: Factory for unit of work instances managing key storage.
+            api_keys: Port for reading and writing provider API keys.
             logger_factory: Factory port for instantiating class loggers.
         """
         self._settings_repo = settings_repo
-        self._uow_factory = uow_factory
-        self._read_only_uow_factory = read_only_uow_factory
+        self._api_keys = api_keys
         self._logger = logger_factory.create(__name__)
 
     async def load(self) -> Settings:
-        """Load settings from storage and handle legacy API key migrations.
+        """Load settings from storage.
 
-        Populates API keys from encrypted storage for chat and embedding services.
-        If legacy plaintext/Fernet keys exist in pre-v2 settings files, they are
-        automatically migrated to encrypted storage and scrubbed from the JSON file.
+        Populates API keys from secure storage for chat and embedding services.
 
         Returns:
             Settings: Loaded or default settings instance with updated API keys.
         """
         self._logger.debug("Starting application settings loading sequence")
         settings = self._settings_repo.load() or Settings()
-        migrated = False
 
         for service_type, service in (
             ("chat", settings.chat),
             ("embedding", settings.embedding),
         ):
-            async with self._read_only_uow_factory() as uow:
-                stored = await uow.api_keys.get(service.provider)
-
+            stored = await self._api_keys.get(service.provider)
             if stored is not None:
                 service.api_key = stored.value
                 self._logger.debug(
@@ -59,24 +52,6 @@ class SettingsService:
                     service_type,
                     service.provider.value,
                 )
-            elif service.api_key.strip():
-                # The repository only yields a key from a pre-v2 settings file.
-                legacy = service.api_key.strip()
-                async with self._uow_factory() as uow:
-                    await uow.api_keys.save(ApiKey(service.provider, legacy))
-                    await uow.commit()
-                migrated = True
-                self._logger.info(
-                    "Successfully migrated legacy API key for provider '%s' to "
-                    "secure storage",
-                    service.provider.value,
-                )
-
-        if migrated:
-            self._logger.info(
-                "Saving sanitized settings file to remove legacy API keys"
-            )
-            self._settings_repo.save(settings)  # rewrites the file without the key
 
         self._logger.debug("Application settings load complete")
         return settings
@@ -104,20 +79,18 @@ class SettingsService:
         self._settings_repo.save(settings)
 
         for provider, value in keys.items():
-            async with self._uow_factory() as uow:
-                if value:
-                    await uow.api_keys.save(ApiKey(provider, value))
-                    self._logger.debug(
-                        "Saved encrypted API key for provider '%s'",
-                        provider.value,
-                    )
-                else:
-                    await uow.api_keys.delete(provider)
-                    self._logger.debug(
-                        "Removed API key for provider '%s' from storage",
-                        provider.value,
-                    )
-                await uow.commit()
+            if value:
+                await self._api_keys.save(ApiKey(provider, value))
+                self._logger.debug(
+                    "Saved API key for provider '%s'",
+                    provider.value,
+                )
+            else:
+                await self._api_keys.delete(provider)
+                self._logger.debug(
+                    "Removed API key for provider '%s' from storage",
+                    provider.value,
+                )
 
         self._logger.info("Successfully persisted settings and provider API keys")
 
@@ -170,8 +143,7 @@ class SettingsService:
             list[LLMProvider]: Providers currently stored in the key repository.
         """
         self._logger.debug("Querying secure storage for providers with saved API keys")
-        async with self._read_only_uow_factory() as uow:
-            providers = await uow.api_keys.list_providers()
+        providers = await self._api_keys.list_providers()
         self._logger.debug("Found %d provider(s) with saved keys", len(providers))
         return providers
 
@@ -181,8 +153,7 @@ class SettingsService:
         Args:
             service: Service configuration instance to update with a saved key.
         """
-        async with self._read_only_uow_factory() as uow:
-            stored = await uow.api_keys.get(service.provider)
+        stored = await self._api_keys.get(service.provider)
         if stored is not None:
             service.api_key = stored.value
             self._logger.debug(

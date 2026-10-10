@@ -5,9 +5,6 @@ from sqlalchemy.ext.asyncio import async_sessionmaker
 from sqlmodel.ext.asyncio.session import AsyncSession
 
 from codex_query.application.ports.unit_of_work import UnitOfWork
-from codex_query.infrastructure.persistence.sqlmodel.repositories.sqlmodel_api_keys_repo import (  # noqa: E501
-    SqlModelApiKeyRepository,
-)
 from codex_query.infrastructure.persistence.sqlmodel.repositories.sqlmodel_book_repo import (  # noqa: E501
     SqlModelBookRepository,
 )
@@ -26,19 +23,16 @@ from codex_query.infrastructure.persistence.sqlmodel.repositories.sqlmodel_vecto
 from codex_query.infrastructure.persistence.vector_store_factory import (
     VectorStoreFactory,
 )
-from codex_query.infrastructure.security.cipher import SecretCipher
 
 
 class SqlUnitOfWork(UnitOfWork):
     def __init__(
         self,
         factory: async_sessionmaker[AsyncSession],
-        cipher: SecretCipher,
         vector_store_factory: VectorStoreFactory | None = None,
     ) -> None:
         self._factory = factory
         self._session: AsyncSession | None = None
-        self._cipher = cipher
         # Default: SQLite + numpy in the same transaction. Pass a factory to swap
         # in another backend (e.g. Chroma on desktop).
         self._vector_store_factory = vector_store_factory or SqlModelVectorStore
@@ -56,7 +50,6 @@ class SqlUnitOfWork(UnitOfWork):
         self.chapters = SqlModelChapterRepository(self._session)
         self.chunks = SqlModelChunkRepository(self._session)
         self.jobs = SqlModelIndexingJobRepository(self._session)
-        self.api_keys = SqlModelApiKeyRepository(self._session, self._cipher)
         self.vectors = self._vector_store_factory(self._session)
         return self
 

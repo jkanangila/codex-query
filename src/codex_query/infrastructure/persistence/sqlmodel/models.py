@@ -174,13 +174,3 @@ class IndexingJob(SQLModel, table=True):
     finished_at: datetime | None = Field(default=None, sa_type=DateTime(timezone=True))
 
     book: Book = Relationship(back_populates="jobs")
-
-
-class ApiKey(SQLModel, table=True):
-    """Database ORM model for storing encrypted provider API keys."""
-
-    __tablename__ = "api_keys"  # pyright: ignore[reportAssignmentType]
-
-    provider: str = Field(primary_key=True)  # LLMProvider.value
-    encrypted_key: str  # Fernet token, never plaintext
-    updated_at: datetime = Field(default_factory=lambda: datetime.now(UTC))

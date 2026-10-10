@@ -72,3 +72,11 @@ class ProviderUnavailableError(ProviderError):
 
 class ProviderResponseError(ProviderError):
     """Raised when provider responds but payload is malformed or unexpected."""
+
+
+class SecureStorageUnavailableError(Exception):
+    """Raised when the platform secure storage cannot be used.
+
+    On Linux this means the Secret Service dependencies (libsecret and a running
+    keyring such as gnome-keyring or KWallet) are missing or not reachable.
+    """

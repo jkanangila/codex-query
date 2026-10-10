@@ -40,6 +40,8 @@ class TextChunk:
 
 @dataclass
 class BookMetaData:
+    number: int | None = None
+    chunks: int | None = None
     file_type: str | None = None
     genre: str | None = None
     year: str | None = None

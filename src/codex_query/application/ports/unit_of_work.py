@@ -16,7 +16,6 @@ class UnitOfWork(Protocol):
     chapters: IChapterRepository
     chunks: IChunkRepository
     jobs: IndexingJobPort
-    api_keys: ApiKeyRepositoryPort
 
     async def __aenter__(self) -> Self: ...
     async def __aexit__(

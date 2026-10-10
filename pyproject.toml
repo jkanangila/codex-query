@@ -18,24 +18,21 @@ dependencies = [
   "asyncpg>=0.31.0",
   "sqlalchemy[asyncio]>=2.0.54",
   "sqlmodel>=0.0.47",
-
   # Document & EPUB Parsing
   "beautifulsoup4>=4.13",
   "ebooklib>=0.18",
-
   # Interface & UI
   "click>=8.1",
   "flet>=0.80",
   "questionary>=2.1",
   "rich>=14.0",
-
   # Core Utilities, Networking & Security
-  "cryptography>=50.0.2",
   "httpx>=0.28.1",
-  "keyring>=25.7.0",
   "numpy>=2.5.3",
   "platformdirs>=4.12.1",
   "pydantic-settings>=2.15.0",
+  "flet-secure-storage>=1.0.1",
+  "chromadb>=1.5.9",
 ]
 
 [project.optional-dependencies]
