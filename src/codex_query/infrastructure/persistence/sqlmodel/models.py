@@ -2,7 +2,7 @@ from datetime import UTC, datetime
 from enum import Enum
 from typing import Any
 
-from sqlalchemy import JSON, DateTime, Text
+from sqlalchemy import JSON, DateTime, LargeBinary, Text
 from sqlalchemy import Enum as SAEnum
 from sqlalchemy.ext.mutable import MutableDict
 from sqlmodel import Field, Relationship, SQLModel, UniqueConstraint
@@ -20,10 +20,25 @@ SQLModel.metadata.naming_convention = {
 
 
 def utcnow() -> datetime:
+    """Generate the current timezone-aware UTC datetime timestamp.
+
+    Returns:
+        datetime: Current datetime instance set to UTC.
+    """
     return datetime.now(UTC)
 
 
 def _enum[E: Enum](enum_cls: type[E]) -> SAEnum:
+    """Create a non-native SQLAlchemy Enum type using string enum values.
+
+    Args:
+        enum_cls: The Python Enum class to represent.
+
+    Returns:
+        SAEnum: Configured SQLAlchemy Enum column type storing string values instead
+            of member names.
+    """
+
     def values(members: type[E]) -> list[str]:
         return [str(m.value) for m in members]
 
@@ -38,6 +53,8 @@ _CASCADE = {"cascade": "all, delete-orphan", "passive_deletes": True}
 
 
 class Book(SQLModel, table=True):
+    """Database ORM model representing a book in the library catalog."""
+
     __tablename__ = "book"  # pyright: ignore[reportAssignmentType]
 
     id: int | None = Field(default=None, primary_key=True)
@@ -68,6 +85,8 @@ class Book(SQLModel, table=True):
 
 
 class Chapter(SQLModel, table=True):
+    """Database ORM model representing a chapter belonging to a book."""
+
     __tablename__ = "chapter"  # pyright: ignore[reportAssignmentType]
     __table_args__ = (
         # also serves lookups by book_id (leftmost prefix)
@@ -79,7 +98,6 @@ class Chapter(SQLModel, table=True):
     href: str
     title: str
     chapter_order: int
-    content: str  # use defer(Chapter.content) in queries that don't need it
     content_hash: str
 
     book: Book = Relationship(back_populates="chapters")
@@ -89,13 +107,14 @@ class Chapter(SQLModel, table=True):
 
 
 class TextChunk(SQLModel, table=True):
+    """Database ORM model representing an indexed text chunk of a chapter."""
+
     __tablename__ = "text_chunk"  # pyright: ignore[reportAssignmentType]
     __table_args__ = (
         UniqueConstraint("chapter_id", "chunk_index", name="uq_chunk_chapter_index"),
     )
 
     id: int | None = Field(default=None, primary_key=True)
-    chunk_hash: str = Field(index=True)
     chapter_id: int = Field(foreign_key="chapter.id", ondelete="CASCADE")
     chunk_index: int
     text: str
@@ -107,7 +126,29 @@ class TextChunk(SQLModel, table=True):
     chapter: Chapter | None = Relationship(back_populates="chunks")
 
 
+class ChunkEmbedding(SQLModel, table=True):
+    """Embedding for a text chunk: float32, L2-normalized, stored as raw bytes.
+
+    Rows are removed by the database when their chunk or book is deleted
+    (ON DELETE CASCADE; requires PRAGMA foreign_keys = ON, which is set).
+    """
+
+    __tablename__ = "chunk_embedding"  # pyright: ignore[reportAssignmentType]
+
+    chunk_id: int = Field(
+        foreign_key="text_chunk.id", ondelete="CASCADE", primary_key=True
+    )
+    # Denormalized so a whole book's matrix loads with one indexed query.
+    book_id: int = Field(foreign_key="book.id", ondelete="CASCADE", index=True)
+    model: str
+    dim: int
+    vector: bytes = Field(sa_type=LargeBinary, nullable=False)
+    stored_at_ns: int  # bumped on every upsert; validates the in-memory cache
+
+
 class IndexingJob(SQLModel, table=True):
+    """Database ORM model representing an background indexing job execution."""
+
     __tablename__ = "indexing_job"  # pyright: ignore[reportAssignmentType]
 
     id: int | None = Field(default=None, primary_key=True)
@@ -133,3 +174,13 @@ class IndexingJob(SQLModel, table=True):
     finished_at: datetime | None = Field(default=None, sa_type=DateTime(timezone=True))
 
     book: Book = Relationship(back_populates="jobs")
+
+
+class ApiKey(SQLModel, table=True):
+    """Database ORM model for storing encrypted provider API keys."""
+
+    __tablename__ = "api_keys"  # pyright: ignore[reportAssignmentType]
+
+    provider: str = Field(primary_key=True)  # LLMProvider.value
+    encrypted_key: str  # Fernet token, never plaintext
+    updated_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
