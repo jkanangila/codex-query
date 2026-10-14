@@ -5,38 +5,29 @@ import asyncio
 import flet as ft
 from dotenv import find_dotenv, load_dotenv
 
-from codex_query.di.bootstrap import build_composition_root
+from codex_query.di.bootstrap import CompositionRoot
 from codex_query.infrastructure.logging.config import asyncio_handler
+from codex_query.infrastructure.persistence.sqlmodel.config import db_config
+from codex_query.presentation.ui.app import CodexApp
+from codex_query.presentation.ui.theme import configure_page
+from codex_query.presentation.ui.viewmodels.app_viewmodel import AppViewModel
 
 load_dotenv(find_dotenv())
 
 
 async def _main(page: ft.Page) -> None:
     """Build and manage the Flet GUI lifecycle."""
+    configure_page(page)
     platform = page.platform.value if page.platform else ""
-    container = await build_composition_root(platform=platform)
+    async with CompositionRoot(platform, db_config) as composition:
+        asyncio.get_running_loop().set_exception_handler(asyncio_handler)
 
-    asyncio.get_running_loop().set_exception_handler(asyncio_handler)
+        async def on_close() -> None:
+            await composition.database.shutdown()
 
-    greetings = ft.Text(
-        "Welcome to Codex Query", theme_style=ft.TextThemeStyle.DISPLAY_MEDIUM
-    )
-    platform = ft.Text(
-        f"Current platform: {platform}", theme_style=ft.TextThemeStyle.BODY_MEDIUM
-    )
+        page.on_close = on_close
 
-    async def on_close() -> None:
-        await container.database.shutdown()
-
-    page.on_close = on_close
-
-    page.add(
-        ft.Container(
-            content=ft.Column(controls=[greetings, platform]),
-            alignment=ft.Alignment.CENTER,
-            expand=True,
-        )
-    )
+        CodexApp(page, AppViewModel(composition))
 
 
 def main() -> None:
