@@ -78,7 +78,8 @@ module-name = "codex_query"
 module-root = "src"
 
 [tool.flet]
-org = "codex_query"
+org = "dev.codex_query"
+company = "Kanangila"
 product = "Offline EPUB RAG"
 app.path = "src/codex_query/presentation/ui"
 
