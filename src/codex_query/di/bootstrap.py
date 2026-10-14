@@ -1,9 +1,15 @@
-from dataclasses import dataclass
-from functools import partial
+from __future__ import annotations
+
+from collections.abc import Callable
+from contextlib import AsyncExitStack
+from functools import cached_property
+from types import TracebackType
+from typing import Self
 
 import flet_secure_storage as fss
 import httpx
 
+from codex_query.application.facade import SettingsFacade, UseCases
 from codex_query.application.ports.api_keys import ApiKeyRepositoryPort
 from codex_query.application.ports.chat import ChatPort
 from codex_query.application.ports.embeddings import EmbeddingPort
@@ -16,6 +22,22 @@ from codex_query.application.ports.logger import LoggerFactoryPort
 from codex_query.application.ports.unit_of_work import UnitOfWorkFactory
 from codex_query.application.services.chunks import TextChunkService
 from codex_query.application.services.settings_service import SettingsService
+from codex_query.application.services.test_connection_service import (
+    ConnectionTestService,
+)
+from codex_query.application.use_cases.settings.apply_budget_preset import (
+    ApplyBudgetPreset,
+)
+from codex_query.application.use_cases.settings.check_embedding_compatibility import (
+    CheckEmbeddingCompatibility,
+)
+from codex_query.application.use_cases.settings.get_draft import GetDraftSettings
+from codex_query.application.use_cases.settings.get_settings import GetCurrentSettings
+from codex_query.application.use_cases.settings.test_model_connection import (
+    TestConnection,
+)
+from codex_query.application.use_cases.settings.update_settings import UpdateSettings
+from codex_query.domain.models.settings import ServiceSettings, Settings
 from codex_query.infrastructure.document_parsing.ebook_lib.ebook_lib_document_parser import (  # noqa: E501
     EbookLibDocumentParser,
 )
@@ -25,13 +47,16 @@ from codex_query.infrastructure.llm.factory import (
 )
 from codex_query.infrastructure.logging.config import configure_logging
 from codex_query.infrastructure.logging.factory import PythonLoggerFactory
-from codex_query.infrastructure.persistence.sqlmodel.config import db_config
+from codex_query.infrastructure.persistence.sqlmodel.config import (
+    DatabaseConfig,
+)
 from codex_query.infrastructure.persistence.sqlmodel.database import SqlModelDatabase
 from codex_query.infrastructure.persistence.sqlmodel.uow import (
     SqlReadOnlyUnitOfWork,
     SqlUnitOfWork,
 )
 from codex_query.infrastructure.persistence.vector_store_factory import (
+    VectorStoreFactory,
     backend_for_platform,
     build_vector_store_factory,
 )
@@ -43,102 +68,194 @@ from codex_query.infrastructure.settings.json_settings_repository import (
 )
 
 
-@dataclass(frozen=True)
-class ApplicationContainer:
-    """Dependency injection container holding instantiated application services."""
+class _LatestByKey[K, V]:
+    """Single-slot cache that rebuilds its value whenever the key changes."""
 
-    logger_factory: LoggerFactoryPort
-    database: SqlModelDatabase
-    uow_factory: UnitOfWorkFactory
-    read_only_uow_factory: UnitOfWorkFactory
-    document_parser: DocumentParserPort
-    settings_service: SettingsService
-    text_chunk_service: TextChunksPort
-    async_http_client: httpx.AsyncClient
-    chat_adapter: ChatPort
-    embedding_adapter: EmbeddingPort
+    def __init__(self, build: Callable[[K], V]) -> None:
+        self._build = build
+        self._slot: tuple[K, V] | None = None
+
+    def get(self, key: K) -> V:
+        slot = self._slot
+        if slot is not None and slot[0] == key:
+            return slot[1]
+        value = self._build(key)
+        self._slot = (key, value)
+        return value
 
 
-async def build_composition_root(platform: str) -> ApplicationContainer:
-    """Build and initialize the dependency graph for the application.
+class CompositionRoot:
+    """Wires the object graph.
 
-    Args:
-        platform: Target platform used to select vector store backend implementations.
-
-    Returns:
-        ApplicationContainer holding all configured ports and adapters.
+    Lifecycle: construct (no I/O) -> ``await start()`` -> use -> ``await aclose()``.
+    Prefer ``async with CompositionRoot(...) as root:``. A root is single-use and
+    belongs to one event loop: ``httpx.AsyncClient`` and the async engine are
+    bound to the loop they first run on.
     """
+
+    def __init__(self, platform: str, db_config: DatabaseConfig) -> None:
+        self.platform = platform
+        self.db_config = db_config
+        self._exit_stack = AsyncExitStack()
+        self._chat_cache = _LatestByKey[ServiceSettings, ChatPort](self._build_chat)
+        self._embedding_cache = _LatestByKey[ServiceSettings, EmbeddingPort](
+            self._build_embedding
+        )
+
+    # --------------------------------------------------------------------------
+    # Lifecycle
+    # --------------------------------------------------------------------------
+    async def start(self) -> None:
+        """Run the I/O-bound initialization. Call once, before using use_cases."""
+        try:
+            await self.database.startup()
+            await self.settings_service.load()
+        except BaseException:
+            await self.aclose()  # don't leak a half-initialized engine
+            raise
+
+    async def aclose(self) -> None:
+        """Close everything that was actually built, in reverse order."""
+        await self._exit_stack.aclose()
+
+    async def __aenter__(self) -> Self:
+        await self.start()
+        return self
+
+    async def __aexit__(
+        self,
+        exc_type: type[BaseException] | None,
+        exc: BaseException | None,
+        tb: TracebackType | None,
+    ) -> None:
+        await self.aclose()
+
     # --------------------------------------------------------------------------
     # Logging & Security
     # --------------------------------------------------------------------------
-    configure_logging()
-    logger_factory: LoggerFactoryPort = PythonLoggerFactory()
+    @cached_property
+    def logger_factory(self) -> LoggerFactoryPort:
+        configure_logging()
+        return PythonLoggerFactory()
 
-    storage = fss.SecureStorage()
-    api_keys_repository: ApiKeyRepositoryPort = SecureStorageApiKeyRepository(
-        storage=storage
-    )
+    @cached_property
+    def api_keys_repository(self) -> ApiKeyRepositoryPort:
+        storage = fss.SecureStorage()
+        return SecureStorageApiKeyRepository(storage=storage)
 
     # --------------------------------------------------------------------------
     # Database & Persistence (SQL + Vector)
     # --------------------------------------------------------------------------
-    database = SqlModelDatabase(db_config)
-    await database.startup()
+    @cached_property
+    def database(self) -> SqlModelDatabase:
+        # Construction only; start() runs the async startup (tables/migrations).
+        db = SqlModelDatabase(self.db_config)
+        self._exit_stack.push_async_callback(db.shutdown)
+        return db
 
-    vector_backend = backend_for_platform(platform=platform)
-    vector_store_factory = build_vector_store_factory(backend=vector_backend)
+    @cached_property
+    def vector_store_factory(self) -> VectorStoreFactory:
+        vector_backend = backend_for_platform(platform=self.platform)
+        return build_vector_store_factory(backend=vector_backend)
 
-    uow_factory: UnitOfWorkFactory = partial(
-        SqlUnitOfWork,
-        database.session_factory,
-        vector_store_factory,
-    )
-    read_only_uow_factory: UnitOfWorkFactory = partial(
-        SqlReadOnlyUnitOfWork,
-        database.session_factory,
-        vector_store_factory,
-    )
+    @cached_property
+    def uow_factory(self) -> UnitOfWorkFactory:
+        session_factory = self.database.session_factory
+        vector_stores = self.vector_store_factory
+
+        def make_uow() -> SqlUnitOfWork:
+            return SqlUnitOfWork(session_factory, vector_stores)
+
+        return make_uow
+
+    @cached_property
+    def read_only_uow_factory(self) -> UnitOfWorkFactory:
+        session_factory = self.database.session_factory
+        vector_stores = self.vector_store_factory
+
+        def make_uow() -> SqlReadOnlyUnitOfWork:
+            return SqlReadOnlyUnitOfWork(session_factory, vector_stores)
+
+        return make_uow
 
     # --------------------------------------------------------------------------
     # Document Parsing & Domain Services
     # --------------------------------------------------------------------------
-    document_parser: DocumentParserPort = EbookLibDocumentParser()
-    text_chunk_service: TextChunksPort = TextChunkService(logger_factory=logger_factory)
+    @cached_property
+    def document_parser(self) -> DocumentParserPort:
+        return EbookLibDocumentParser()
 
-    settings_repository: SettingsRepositoryPort = JsonSettingsRepository()
-    settings_service = SettingsService(
-        settings_repo=settings_repository,
-        logger_factory=logger_factory,
-        api_keys=api_keys_repository,
-    )
-    settings = await settings_service.load()
+    @cached_property
+    def text_chunk_service(self) -> TextChunksPort:
+        return TextChunkService(logger_factory=self.logger_factory)
+
+    @cached_property
+    def settings_service(self) -> SettingsService:
+        settings_repository: SettingsRepositoryPort = JsonSettingsRepository()
+        return SettingsService(
+            settings_repo=settings_repository,
+            logger_factory=self.logger_factory,
+            api_keys=self.api_keys_repository,
+        )
+
+    @property
+    def settings(self) -> Settings:
+        """Live view of the current settings. Deliberately not cached here."""
+        return self.settings_service.current
 
     # --------------------------------------------------------------------------
     # HTTP Client & LLM Adapters
     # --------------------------------------------------------------------------
     # Long read timeout configured to accommodate slow local Ollama inference
-    async_http_client = httpx.AsyncClient(
-        timeout=httpx.Timeout(connect=10.0, read=300.0, write=30.0, pool=10.0)
-    )
+    @cached_property
+    def async_http_client(self) -> httpx.AsyncClient:
+        client = httpx.AsyncClient(
+            timeout=httpx.Timeout(connect=10.0, read=300.0, write=30.0, pool=10.0)
+        )
+        self._exit_stack.push_async_callback(client.aclose)
+        return client
 
-    chat_adapter: ChatPort = create_chat_adapter(
-        client=async_http_client,
-        settings=settings.chat,
-    )
-    embedding_adapter: EmbeddingPort = create_embedding_adapter(
-        client=async_http_client,
-        settings=settings.embedding,
-    )
+    def _build_chat(self, settings: ServiceSettings) -> ChatPort:
+        return create_chat_adapter(client=self.async_http_client, settings=settings)
 
-    return ApplicationContainer(
-        logger_factory=logger_factory,
-        database=database,
-        uow_factory=uow_factory,
-        read_only_uow_factory=read_only_uow_factory,
-        document_parser=document_parser,
-        settings_service=settings_service,
-        text_chunk_service=text_chunk_service,
-        async_http_client=async_http_client,
-        chat_adapter=chat_adapter,
-        embedding_adapter=embedding_adapter,
-    )
+    def _build_embedding(self, settings: ServiceSettings) -> EmbeddingPort:
+        return create_embedding_adapter(
+            client=self.async_http_client, settings=settings
+        )
+
+    def chat_adapter(self) -> ChatPort:
+        """Adapter for the *current* settings; rebuilt when they change.
+
+        Call it per operation, or inject this bound method as a
+        ``Callable[[], ChatPort]`` provider. Don't hold the result long-term.
+        """
+        return self._chat_cache.get(self.settings.chat)
+
+    def embedding_adapter(self) -> EmbeddingPort:
+        """Same contract as ``chat_adapter``."""
+        return self._embedding_cache.get(self.settings.embedding)
+
+    @cached_property
+    def connection_test_service(self) -> ConnectionTestService:
+        return ConnectionTestService(
+            chat_factory=self._build_chat, embedding_factory=self._build_embedding
+        )
+
+    # --------------------------------------------------------------------------
+    # Use cases
+    # --------------------------------------------------------------------------
+    @cached_property
+    def use_cases(self) -> UseCases:
+        settings_facade = SettingsFacade(
+            apply_budget_preset=ApplyBudgetPreset(self.settings_service),
+            check_embedding_compatibility=CheckEmbeddingCompatibility(
+                self.read_only_uow_factory
+            ),
+            # Takes factories so it can test candidate settings from the form
+            # before they are saved, not the already-saved ones.
+            get_current=GetCurrentSettings(self.settings_service),
+            get_new_draft=GetDraftSettings(self.settings_service),
+            test_model_connection=TestConnection(self.connection_test_service),
+            update_settings=UpdateSettings(self.settings_service),
+        )
+        return UseCases(settings=settings_facade)
