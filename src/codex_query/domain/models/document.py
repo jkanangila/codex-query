@@ -40,11 +40,13 @@ class TextChunk:
 
 @dataclass
 class BookMetaData:
-    number: int | None = None
-    chunks: int | None = None
-    file_type: str | None = None
-    genre: str | None = None
-    year: str | None = None
+    embedding_provider: str = ""
+    embedding_model: str = ""
+    book_number: int | None = None
+    chunks: int = 0
+    file_type: str = ""
+    genre: str = ""
+    year: str = ""
     chapter_count: int = 0
 
 
