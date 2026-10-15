@@ -1,4 +1,7 @@
 from dataclasses import dataclass
+from typing import Literal
+
+type Endpoint = Literal["chat", "embedding"]
 
 
 @dataclass(frozen=True, slots=True)

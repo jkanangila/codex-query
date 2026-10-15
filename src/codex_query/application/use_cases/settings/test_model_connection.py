@@ -1,7 +1,7 @@
 from codex_query.application.services.test_connection_service import (
     ConnectionTestService,
 )
-from codex_query.domain.models.connection import ConnectionTestResult
+from codex_query.domain.models.connection import ConnectionTestResult, Endpoint
 from codex_query.domain.models.settings import ServiceSettings
 
 
@@ -10,5 +10,11 @@ class TestConnection:
         self._service = connection_test_service
         pass
 
-    async def __call__(self, settings: ServiceSettings) -> ConnectionTestResult:
-        raise NotImplementedError
+    async def __call__(
+        self, settings: ServiceSettings, endpoint: Endpoint
+    ) -> ConnectionTestResult:
+        match endpoint:
+            case "chat":
+                return await self._service.test_chat(settings)
+            case "embedding":
+                return await self._service.test_embedding(settings)
