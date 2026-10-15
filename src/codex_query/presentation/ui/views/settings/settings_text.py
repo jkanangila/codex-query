@@ -1,14 +1,12 @@
 """Titles and subtitles for the settings screen.
 
-Every entry is a `SettingText`, which unpacks straight into the tile components
-(title, subtitle are their first two parameters):
+Every entry is a `SettingText`, passed to a tile component as its ``text``:
 
-    TextFieldTile(*TEXT.chat_base_url, value=vm.chat_base_url, on_change=...)
+    TextFieldTile(text=TEXT.chat_base_url, value=vm.chat_base_url, on_change=...)
 """
 
 from __future__ import annotations
 
-from collections.abc import Iterator
 from dataclasses import dataclass, field
 
 
@@ -19,11 +17,6 @@ class SettingText:
     title: str
     subtitle: str
 
-    def __iter__(self) -> Iterator[str]:
-        """Allow `Tile(*text, ...)` unpacking."""
-        yield self.title
-        yield self.subtitle
-
 
 @dataclass(frozen=True, slots=True)
 class SectionText:
@@ -31,9 +24,7 @@ class SectionText:
 
     chat: str = "Chat service"
     embedding: str = "Embedding service"
-    preset: str = "Preset"
     tuning: str = "Tuning"
-    test: str = "Connection test"
 
 
 def _default_tuning() -> dict[str, SettingText]:
@@ -119,12 +110,6 @@ class SettingsText:
 
     # Tuning (keyed by the slider key used in the view model) --------------
     tuning: dict[str, SettingText] = field(default_factory=_default_tuning)
-
-    # Connection test -------------------------------------------------------
-    test_connection: SettingText = SettingText(
-        "Test connection",
-        "Check that both the chat and embedding servers respond.",
-    )
 
     def tuning_text(self, key: str) -> SettingText:
         """Copy for a tuning slider.
