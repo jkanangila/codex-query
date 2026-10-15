@@ -12,11 +12,15 @@ class AppViewModel(ObservableObject):
         self.events = UiEvents()
         self._tab = Tab.LIBRARY
 
-        self.library = object
-        self.chat = object
-        self.index = object
+        # Placeholders (instances, so the attributes are typed) until the real
+        # Library / Chat / Index ViewModels exist.
+        self.library = ObservableObject()
+        self.chat = ObservableObject()
+        self.index = ObservableObject()
         self.settings = SettingsViewModel(
-            self._composition.use_cases.settings, self.events
+            self._composition.use_cases.settings,
+            self.events,
+            composition.logger_factory,
         )
 
         # TODO: add subscriptions

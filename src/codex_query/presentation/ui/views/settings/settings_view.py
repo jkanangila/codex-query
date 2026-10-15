@@ -1,25 +1,36 @@
-from typing import Literal
+from collections.abc import Awaitable, Callable
 
 import flet as ft
 
-from codex_query.domain.models.settings import PresetMode
 from codex_query.presentation.ui.formatting import build_test_result_text
 from codex_query.presentation.ui.utils.flet_helpers import safe_update
 from codex_query.presentation.ui.viewmodels.settings_viewmodel import (
-    CHAT_PROVIDER_OPTIONS,
-    EMBEDDING_PROVIDER_OPTIONS,
+    Endpoint,
     SettingsViewModel,
+    TuningSlider,
 )
 from codex_query.presentation.ui.views.settings.components.choice import Choice
+from codex_query.presentation.ui.views.settings.components.connection_test_row import (
+    ConnectionTestRow,
+)
 from codex_query.presentation.ui.views.settings.components.settings_tile import (
+    TEXT_MUTED,
     DropdownTile,
     SectionHeader,
+    SettingTile,
     SliderTile,
     TextFieldTile,
 )
 from codex_query.presentation.ui.views.settings.settings_text import TEXT
 
-_SLIDER_TOLERANCE = 1e-9  # float noise (0.15000000000000002) must not count as a change
+# Width of the settings column, in 12-column grid units, per window width. On wide
+# windows it stays a comfortable reading width instead of stretching edge to edge.
+_CONTENT_COLUMNS: dict[str | ft.ResponsiveRowBreakpoint, ft.Number] = {
+    "xs": 12,
+    "md": 10,
+    "lg": 9,
+    "xl": 8,
+}
 
 
 class SettingsView:
@@ -30,7 +41,7 @@ class SettingsView:
         self.chat_provider = DropdownTile(
             text=TEXT.chat_provider,
             value=vm.chat_provider,
-            options=list(CHAT_PROVIDER_OPTIONS.keys()),
+            options=vm.chat_provider_options,
             on_change=vm.select_chat_provider,
         )
         self.chat_base_url = TextFieldTile(
@@ -42,157 +53,183 @@ class SettingsView:
             text=TEXT.chat_model, value=vm.chat_model, on_change=vm.set_chat_model
         )
         self.chat_api_key = TextFieldTile(
-            text=TEXT.chat_api_key, value=vm.chat_api_key, on_change=vm.set_chat_api_key
+            text=TEXT.chat_api_key,
+            value=vm.chat_api_key,
+            on_change=vm.set_chat_api_key,
+            password=True,
         )
 
         # ── Embedding Service ─────────────────────────────────────────────────
         self.embedding_provider = DropdownTile(
             text=TEXT.embedding_provider,
             value=vm.embedding_provider,
-            options=list(EMBEDDING_PROVIDER_OPTIONS),
-            on_change=vm.select_chat_provider,
+            options=vm.embedding_provider_options,
+            on_change=vm.select_embedding_provider,
         )
         self.embedding_base_url = TextFieldTile(
             text=TEXT.embedding_base_url,
             value=vm.embedding_base_url,
             on_change=vm.set_embedding_base_url,
         )
+        # Changing the model may open the re-index dialog, so it is committed only
+        # on blur / Enter, never while the user is still typing the name.
         self.embedding_model = TextFieldTile(
             text=TEXT.embedding_model,
             value=vm.embedding_model,
             on_change=vm.set_embedding_model,
+            commit_delay=None,
         )
         self.embedding_api_key = TextFieldTile(
             text=TEXT.embedding_api_key,
             value=vm.embedding_api_key,
             on_change=vm.set_embedding_api_key,
+            password=True,
         )
 
-        # ── Preset ────────────────────────────────────────────────────────────
+        self._text_tiles: dict[Endpoint, list[TextFieldTile]] = {
+            "chat": [self.chat_base_url, self.chat_model, self.chat_api_key],
+            "embedding": [
+                self.embedding_base_url,
+                self.embedding_model,
+                self.embedding_api_key,
+            ],
+        }
+        self._test_rows: dict[Endpoint, ConnectionTestRow] = {
+            "chat": ConnectionTestRow(self._tester("chat")),
+            "embedding": ConnectionTestRow(self._tester("embedding")),
+        }
+
+        # ── Preset & Tuning ───────────────────────────────────────────────────
         self.preset = Choice(
-            options=[(p.name, p.value) for p in PresetMode],
-            value=vm.preset,
+            options=vm.preset_options,
+            value=vm.preset_key,
             on_change=vm.select_preset,
         )
-
-        # ── Tuning ────────────────────────────────────────────────────────────
-        self._slider_tiles: dict[str, SliderTile] = {}
-        self.tuning = ft.Column(
-            spacing=0, controls=[self._build_tuning(s.key) for s in vm.tuning]
+        self.preset_tile = SettingTile(TEXT.preset, below=self.preset.root)
+        self._slider_tiles: dict[str, SliderTile] = {
+            spec.key: self._build_slider(spec) for spec in vm.tuning
+        }
+        self.estimate = ft.Text(
+            vm.estimate_text,
+            theme_style=ft.TextThemeStyle.BODY_SMALL,
+            color=TEXT_MUTED,
         )
 
-        # ── Text ──────────────────────────────────────────────────────────────
-        self.estimate = ft.Text(size=12)
-        self.test_result_chat = ft.Text(size=12)
-        self.test_result_embedding = ft.Text(size=12)
+        # Every tile, so the layout can be re-flowed for narrow windows.
+        self._tiles: list[SettingTile] = [
+            self.chat_provider,
+            *self._text_tiles["chat"],
+            self.embedding_provider,
+            *self._text_tiles["embedding"],
+            self.preset_tile,
+            *self._slider_tiles.values(),
+        ]
 
         # ── Root Layout ───────────────────────────────────────────────────────
+        content = ft.Column(
+            spacing=12,
+            controls=[
+                ft.Text("Settings", theme_style=ft.TextThemeStyle.HEADLINE_MEDIUM),
+                SectionHeader(TEXT.sections.chat),
+                self.chat_provider,
+                self.chat_model,
+                self.chat_base_url,
+                self.chat_api_key,
+                self._test_rows["chat"],
+                ft.Divider(),
+                SectionHeader(TEXT.sections.embedding),
+                self.embedding_provider,
+                self.embedding_model,
+                self.embedding_base_url,
+                self.embedding_api_key,
+                self._test_rows["embedding"],
+                ft.Divider(),
+                SectionHeader(TEXT.sections.tuning),
+                self.preset_tile,
+                *self._slider_tiles.values(),
+                self.estimate,
+            ],
+        )
         self.root = ft.Container(
             padding=12,
             expand=True,
             content=ft.Column(
                 expand=True,
                 scroll=ft.ScrollMode.AUTO,
-                spacing=12,
                 controls=[
-                    ft.Text("Settings", theme_style=ft.TextThemeStyle.DISPLAY_SMALL),
-                    SectionHeader(TEXT.sections.chat),
-                    self.chat_provider,
-                    self.chat_model,
-                    self.chat_base_url,
-                    self.chat_api_key,
-                    self._build_test_control("chat"),
-                    ft.Divider(),
-                    SectionHeader(TEXT.sections.embedding),
-                    self.embedding_provider,
-                    self.embedding_model,
-                    self.embedding_base_url,
-                    self.embedding_api_key,
-                    self._build_test_control("embedding"),
-                    ft.Divider(),
-                    SectionHeader(TEXT.sections.preset),
-                    self.preset.root,
-                    self.tuning,
+                    ft.ResponsiveRow(
+                        alignment=ft.MainAxisAlignment.CENTER,
+                        controls=[ft.Container(col=_CONTENT_COLUMNS, content=content)],
+                    )
                 ],
             ),
         )
 
-    # ── Add tuning tiles ──────────────────────────────────────────────────
-    def _build_tuning(self, key: str) -> SliderTile:
+        vm.subscribe(self.render)
 
-        spec = next(s for s in self._vm.tuning if s.key == key)
-        slider_tile = SliderTile(
-            text=TEXT.tuning_text(spec.key),
+    # ── Builders ──────────────────────────────────────────────────────────
+    def _build_slider(self, spec: TuningSlider) -> SliderTile:
+        key = spec.key
+
+        async def on_change(value: float) -> None:
+            await self._vm.set_tuning(key, value)
+
+        return SliderTile(
+            text=TEXT.tuning_text(key),
             value=spec.value,
             min_value=spec.minimum,
             max_value=spec.maximum,
-            on_change=lambda value: self._vm.set_tuning(key, value),
+            step=spec.step,
+            on_change=on_change,
         )
 
-        self._slider_tiles[key] = slider_tile
-        return slider_tile
+    def _tester(self, endpoint: Endpoint) -> Callable[[], Awaitable[None]]:
+        """Build the handler for an endpoint's "Test connection" button."""
 
-    # ── Test Controls ─────────────────────────────────────────────────────
-    def _build_test_control(self, endpoint: Literal["chat", "embedding"]) -> ft.Row:
-        testing = (
-            self._vm.is_testing_chat
-            if endpoint == "chat"
-            else self._vm.is_testing_embedding
-        )
+        async def run() -> None:
+            # On mobile a focused field may not have lost focus yet, so save any
+            # pending edit first: the test must run against what the user sees.
+            for tile in self._text_tiles[endpoint]:
+                await tile.commit()
+            await self._vm.test_connection(endpoint)
 
-        button_content = (
-            ft.ProgressRing(height=12, width=12)
-            if testing
-            else ft.Text("Test connection")
-        )
-        outlined_button = ft.OutlinedButton(
-            content=button_content,
-            on_click=lambda e: self._vm.test_connection(endpoint),
-            disabled=testing,
-        )
-        test_result = (
-            self.test_result_chat if endpoint == "chat" else self.test_result_embedding
-        )
+        return run
 
-        return ft.Row([outlined_button, test_result])
+    # ── Layout ────────────────────────────────────────────────────────────
+    def set_compact(self, compact: bool) -> None:
+        """Re-flow every tile for a narrow (``True``) or wide window."""
+        for tile in self._tiles:
+            tile.set_compact(compact)
 
     # ── ViewModel -> View ─────────────────────────────────────────────────
     def render(self) -> None:
-        """Bring every control in line with the ViewModel
-        (only touching real differences)."""
+        """Bring every control in line with the ViewModel.
+
+        Each tile ignores a value it already shows, and keeps the user's
+        in-progress edit or drag, so this is cheap and safe to call often.
+        """
         vm = self._vm
-        # chat
-        if self.chat_provider.current_value != vm.chat_provider:
-            self.chat_provider.current_value = vm.chat_provider
-        if self.chat_base_url.current_value != vm.chat_base_url:
-            self.chat_base_url.current_value = vm.chat_base_url
-        if self.chat_model.current_value != vm.chat_model:
-            self.chat_model.current_value = vm.chat_model
-        if self.chat_api_key.current_value != vm.chat_api_key:
-            self.chat_api_key.current_value = vm.chat_api_key
+        self.chat_provider.sync(vm.chat_provider)
+        self.chat_base_url.sync(vm.chat_base_url)
+        self.chat_model.sync(vm.chat_model)
+        self.chat_api_key.sync(vm.chat_api_key)
 
-        # embedding
-        if self.embedding_provider.current_value != vm.embedding_provider:
-            self.embedding_provider.current_value = vm.embedding_provider
-        if self.embedding_base_url.current_value != vm.embedding_base_url:
-            self.embedding_base_url.current_value = vm.embedding_base_url
-        if self.embedding_model.current_value != vm.embedding_model:
-            self.embedding_model.current_value = vm.embedding_model
-        if self.embedding_api_key.current_value != vm.embedding_api_key:
-            self.embedding_api_key.current_value = vm.embedding_api_key
+        self.embedding_provider.sync(vm.embedding_provider)
+        self.embedding_base_url.sync(vm.embedding_base_url)
+        self.embedding_model.sync(vm.embedding_model)
+        self.embedding_api_key.sync(vm.embedding_api_key)
 
-        if self.preset.value != vm.preset:
-            self.preset.set(vm.preset)
-
+        self.preset.set(vm.preset_key)
         for state in vm.tuning:
-            slider = self._slider_tiles[state.key]
-            if abs(slider.current_value - state.value) > _SLIDER_TOLERANCE:
-                slider.current_value = state.value
+            self._slider_tiles[state.key].sync(state.value)
 
         self.estimate.value = vm.estimate_text
+        safe_update(self.estimate)
 
-        self.test_result_chat.value = build_test_result_text(vm.test_result_chat)
-        self.test_result_embedding.value = build_test_result_text(
-            vm.test_result_embedding
-        )
-        safe_update(self.root)
+        for endpoint, row in self._test_rows.items():
+            result = vm.test_result(endpoint)
+            row.show(
+                testing=vm.is_testing(endpoint),
+                text=build_test_result_text(result),
+                ok=None if result is None else result.ok,
+            )
