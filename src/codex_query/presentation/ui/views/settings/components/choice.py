@@ -36,21 +36,25 @@ class Choice:
 
     def _build(self) -> None:
         self.root.controls = [
-            (ft.Button if key == self.value else ft.OutlinedButton)(
-                content=label, on_click=lambda e, k=key: self._handler(k)
-            )
-            for key, label in self._options
+            self._make_button(key, label) for key, label in self._options
         ]
 
-    async def _handler(self, key: str) -> Callable[[ft.ControlEvent], Awaitable[None]]:
-        async def click(_e: ft.ControlEvent) -> None:
+    def _make_button(self, key: str, label: str) -> ft.Control:
+        # Flet picks "sync or async" by inspecting the handler itself, so the
+        # handler must be a real ``async def`` (not a lambda returning a coroutine).
+        async def on_click(
+            _e: ft.Event[ft.Button] | ft.Event[ft.OutlinedButton],
+        ) -> None:
             self.set(key)
             await self._on_change(key)
 
-        return click
+        button_type = ft.Button if key == self.value else ft.OutlinedButton
+        return button_type(content=label, on_click=on_click)
 
     def set(self, key: str) -> None:
         """Select ``key`` and redraw, without invoking ``on_change``."""
+        if key == self.value:
+            return
         self.value = key
         self._build()
         safe_update(self.root)
