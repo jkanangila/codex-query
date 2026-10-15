@@ -12,28 +12,27 @@ NO_SCOPE_TITLE: str = "Pick a book from the library"
 
 
 def fmt_eta(seconds: float | None) -> str:
-    """Format an estimated time of arrival (ETA) in seconds
-
-    into a human-readable string.
+    """Format an estimated time of arrival (ETA) as a human-readable string.
 
     Args:
         seconds: The remaining time in seconds, or None if unknown.
 
     Returns:
         A formatted string representing the remaining time
-        (e.g., "~1 min left", "~42s left"), or an empty string
-        if seconds is None.
+        (e.g., "~1 h 5 min left", "~1 min left", "~42s left"), or an empty
+        string if seconds is None.
     """
     if seconds is None:
         return ""
-    minutes, secs = divmod(int(seconds), 60)
+    hours, remainder = divmod(max(int(seconds), 0), 3600)
+    minutes, secs = divmod(remainder, 60)
+    if hours:
+        return f"~{hours} h {minutes} min left"
     return f"~{minutes} min left" if minutes else f"~{secs}s left"
 
 
 def book_subtitle(book: Book) -> str:
-    """Generate the subtitle text for a library row representation
-
-    of a book.
+    """Generate the subtitle text for a book's row in the library.
 
     Args:
         book: The Book instance to generate the subtitle for.
@@ -48,27 +47,24 @@ def book_subtitle(book: Book) -> str:
 
 
 def scope_title(selected: list[Book]) -> str:
-    """Generate a chat header title based on the currently selected
-
-    books.
+    """Generate a chat header title based on the currently selected books.
 
     Args:
         selected: A list of selected Book instances.
 
     Returns:
-        A title string describing the active selection scope
-        (e.g., a specific book title, a series description, or the
-        default scope title).
+        A title string describing the active selection scope: the book's own
+        title for one book, the series name when every selected book belongs to
+        the same series, or a plain count otherwise.
     """
     if not selected:
         return NO_SCOPE_TITLE
     if len(selected) == 1:
         return selected[0].title
-    first = selected[0]
-    # Prefer the real series name; fall back to the first word of the title
-    # (what the original UI always used) for books without series metadata.
-    name = first.series or first.title.split(" ")[0]
-    return f"{name} series · {len(selected)} books"
+    series = {book.series for book in selected}
+    if len(series) == 1 and (name := next(iter(series))):
+        return f"{name} series · {len(selected)} books"
+    return f"{len(selected)} books selected"
 
 
 def job_status_text(job: IndexingJob) -> str:
@@ -86,14 +82,12 @@ def job_status_text(job: IndexingJob) -> str:
             return ""
 
 
-def job_counter_text(job: IndexingJob, eta: int) -> str:
-    """Generate a progress counter string combining chunks and
-
-    estimated time.
+def job_counter_text(job: IndexingJob, eta: float | None) -> str:
+    """Generate a progress counter string combining chunks and estimated time.
 
     Args:
         job: The IndexingJob instance being tracked.
-        eta: The estimated remaining time in seconds.
+        eta: The estimated remaining time in seconds, or None if unknown.
 
     Returns:
         A formatted progress string (e.g., "Chunk 400 / 1,200 · ~1 min left"),
@@ -101,10 +95,19 @@ def job_counter_text(job: IndexingJob, eta: int) -> str:
     """
     if not job.total:
         return ""
-    return f"Chunk {job.done:,} / {job.total:,} · {fmt_eta(eta)}"
+    counter = f"Chunk {job.done:,} / {job.total:,}"
+    remaining = fmt_eta(eta)
+    return f"{counter} · {remaining}" if remaining else counter
 
 
 def build_test_result_text(result: ConnectionTestResult | None) -> str:
-    if result and result.ok:
+    """Describe the outcome of a connection test.
+
+    Returns an empty string when no test has been run (or its result went stale
+    because the endpoint was edited).
+    """
+    if result is None:
+        return ""
+    if result.ok:
         return f"✓ {result.latency_ms:.0f} ms [{result.message}]"
-    return "✗ Unreachable"
+    return f"✗ {result.message}" if result.message else "✗ Unreachable"

@@ -8,7 +8,7 @@ SEED_COLOR = "teal"
 def configure_page(page: ft.Page) -> None:
     """Apply Codex-Query's title and Material 3 theme
     (follows the system light/dark mode)."""
-    page.title = "Folio"
+    page.title = "Codex-Query"
     page.padding = 0  # the shell manages its own spacing
     page.theme_mode = ft.ThemeMode.SYSTEM
     page.theme = ft.Theme(color_scheme_seed=SEED_COLOR)

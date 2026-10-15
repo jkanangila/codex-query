@@ -12,26 +12,31 @@ from codex_query.presentation.ui.app import CodexApp
 from codex_query.presentation.ui.theme import configure_page
 from codex_query.presentation.ui.viewmodels.app_viewmodel import AppViewModel
 
-load_dotenv(find_dotenv())
-
 
 async def _main(page: ft.Page) -> None:
     """Build and manage the Flet GUI lifecycle."""
     configure_page(page)
     platform = page.platform.value if page.platform else ""
-    async with CompositionRoot(platform, db_config) as composition:
+
+    composition = CompositionRoot(platform, db_config)
+    await composition.start()
+    try:
         asyncio.get_running_loop().set_exception_handler(asyncio_handler)
 
         async def on_close() -> None:
-            await composition.database.shutdown()
+            await composition.aclose()
 
         page.on_close = on_close
 
         CodexApp(page, AppViewModel(composition))
+    except BaseException:
+        await composition.aclose()
+        raise
 
 
 def main() -> None:
     """Application entry point to launch the Flet UI."""
+    load_dotenv(find_dotenv())
     ft.run(_main)
 
 
