@@ -3,7 +3,9 @@ import flet as ft
 from codex_query.application.use_cases.settings.check_embedding_compatibility import (
     StaleBook,
 )
-from codex_query.presentation.ui.viewmodels.events import EmbeddingChangeRequest
+from codex_query.presentation.ui.viewmodels.events.ui_events import (
+    EmbeddingChangeRequest,
+)
 
 
 def build_embedding_dialog(

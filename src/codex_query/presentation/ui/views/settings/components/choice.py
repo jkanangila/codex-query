@@ -43,7 +43,7 @@ class Choice:
         # Flet picks "sync or async" by inspecting the handler itself, so the
         # handler must be a real ``async def`` (not a lambda returning a coroutine).
         async def on_click(
-            _e: ft.Event[ft.Button] | ft.Event[ft.OutlinedButton],
+            _e: ft.Event[ft.OutlinedButton] | ft.Event[ft.Button],
         ) -> None:
             self.set(key)
             await self._on_change(key)

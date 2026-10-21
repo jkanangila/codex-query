@@ -1,7 +1,15 @@
+"""Settings view presentation layer module.
+
+This module provides the `SettingsView` class, responsible for building and managing
+the user interface components for application settings, including chat and
+embedding service configurations, presets, and tuning parameters using Flet.
+"""
+
 from collections.abc import Awaitable, Callable
 
 import flet as ft
 
+from codex_query.application.ports.logger import LoggerFactoryPort
 from codex_query.presentation.ui.formatting import build_test_result_text
 from codex_query.presentation.ui.utils.flet_helpers import safe_update
 from codex_query.presentation.ui.viewmodels.settings_viewmodel import (
@@ -25,7 +33,7 @@ from codex_query.presentation.ui.views.settings.settings_text import TEXT
 
 # Width of the settings column, in 12-column grid units, per window width. On wide
 # windows it stays a comfortable reading width instead of stretching edge to edge.
-_CONTENT_COLUMNS: dict[str | ft.ResponsiveRowBreakpoint, ft.Number] = {
+_CONTENT_COLUMNS = {
     "xs": 12,
     "md": 10,
     "lg": 9,
@@ -34,10 +42,26 @@ _CONTENT_COLUMNS: dict[str | ft.ResponsiveRowBreakpoint, ft.Number] = {
 
 
 class SettingsView:
-    def __init__(self, vm: SettingsViewModel) -> None:
-        self._vm = vm
+    """View implementation for configuring application settings.
 
-        # ── Chat Service ──────────────────────────────────────────────────────
+    Manages UI tiles, layouts, and data binding for chat endpoints, embedding
+    endpoints, presets, and model tuning parameters.
+    """
+
+    def __init__(
+        self, vm: SettingsViewModel, logger_factory: LoggerFactoryPort
+    ) -> None:
+        """Initializes the SettingsView.
+
+        Args:
+            vm: The settings view model containing application state and logic.
+            logger_factory: Factory used to create a structured component logger.
+        """
+        self._vm = vm
+        self._logger = logger_factory.create(__name__)
+        self._logger.debug("Initializing SettingsView UI layout and controls.")
+
+        # ── Chat Service ──────────────────────────────────────────────────
         self.chat_provider = DropdownTile(
             text=TEXT.chat_provider,
             value=vm.chat_provider,
@@ -50,7 +74,9 @@ class SettingsView:
             on_change=vm.set_chat_base_url,
         )
         self.chat_model = TextFieldTile(
-            text=TEXT.chat_model, value=vm.chat_model, on_change=vm.set_chat_model
+            text=TEXT.chat_model,
+            value=vm.chat_model,
+            on_change=vm.set_chat_model,
         )
         self.chat_api_key = TextFieldTile(
             text=TEXT.chat_api_key,
@@ -59,7 +85,7 @@ class SettingsView:
             password=True,
         )
 
-        # ── Embedding Service ─────────────────────────────────────────────────
+        # ── Embedding Service ─────────────────────────────────────────────
         self.embedding_provider = DropdownTile(
             text=TEXT.embedding_provider,
             value=vm.embedding_provider,
@@ -99,7 +125,7 @@ class SettingsView:
             "embedding": ConnectionTestRow(self._tester("embedding")),
         }
 
-        # ── Preset & Tuning ───────────────────────────────────────────────────
+        # ── Preset & Tuning ───────────────────────────────────────────────
         self.preset = Choice(
             options=vm.preset_options,
             value=vm.preset_key,
@@ -125,29 +151,38 @@ class SettingsView:
             *self._slider_tiles.values(),
         ]
 
-        # ── Root Layout ───────────────────────────────────────────────────────
+        # ── Root Layout ───────────────────────────────────────────────────
         content = ft.Column(
-            spacing=12,
+            spacing=0,  # vertical rhythm comes from the tiles' own padding
             controls=[
-                ft.Text("Settings", theme_style=ft.TextThemeStyle.HEADLINE_MEDIUM),
+                ft.Container(
+                    content=ft.Text(
+                        "Settings",
+                        theme_style=ft.TextThemeStyle.HEADLINE_MEDIUM,
+                    ),
+                    padding=ft.Padding.only(left=16, right=16, bottom=8),
+                ),
                 SectionHeader(TEXT.sections.chat),
                 self.chat_provider,
                 self.chat_model,
                 self.chat_base_url,
                 self.chat_api_key,
-                self._test_rows["chat"],
+                self._inset_row("chat"),
                 ft.Divider(),
                 SectionHeader(TEXT.sections.embedding),
                 self.embedding_provider,
                 self.embedding_model,
                 self.embedding_base_url,
                 self.embedding_api_key,
-                self._test_rows["embedding"],
+                self._inset_row("embedding"),
                 ft.Divider(),
                 SectionHeader(TEXT.sections.tuning),
                 self.preset_tile,
                 *self._slider_tiles.values(),
-                self.estimate,
+                ft.Container(
+                    content=self.estimate,
+                    padding=ft.Padding.symmetric(horizontal=16, vertical=8),
+                ),
             ],
         )
         self.root = ft.Container(
@@ -166,12 +201,24 @@ class SettingsView:
         )
 
         vm.subscribe(self.render)
+        self._logger.debug("SettingsView initialized successfully.")
 
     # ── Builders ──────────────────────────────────────────────────────────
     def _build_slider(self, spec: TuningSlider) -> SliderTile:
+        """Builds and returns a slider tile for a given tuning specification.
+
+        Args:
+            spec: The tuning slider configuration specification.
+
+        Returns:
+            A configured `SliderTile` instance.
+        """
         key = spec.key
 
         async def on_change(value: float) -> None:
+            self._logger.debug(
+                "Tuning slider '%s' changed to new value: %s", key, value
+            )
             await self._vm.set_tuning(key, value)
 
         return SliderTile(
@@ -184,30 +231,59 @@ class SettingsView:
         )
 
     def _tester(self, endpoint: Endpoint) -> Callable[[], Awaitable[None]]:
-        """Build the handler for an endpoint's "Test connection" button."""
+        """Builds the handler for an endpoint's 'Test connection' button.
+
+        Args:
+            endpoint: The target endpoint identifier (e.g., 'chat' or 'embedding').
+
+        Returns:
+            An asynchronous callback function executing the connection test.
+        """
 
         async def run() -> None:
+            self._logger.info("Starting connection test for endpoint: %s", endpoint)
             # On mobile a focused field may not have lost focus yet, so save any
             # pending edit first: the test must run against what the user sees.
             for tile in self._text_tiles[endpoint]:
                 await tile.commit()
             await self._vm.test_connection(endpoint)
+            self._logger.debug("Connection test flow completed for: %s", endpoint)
 
         return run
 
+    def _inset_row(self, endpoint: Endpoint) -> ft.Control:
+        """Builds the endpoint's test row container aligned with text tiles.
+
+        Args:
+            endpoint: The target endpoint identifier.
+
+        Returns:
+            A configured Flet control containing the connection test row.
+        """
+        return ft.Container(
+            content=self._test_rows[endpoint],
+            padding=ft.Padding.only(left=16, right=16, top=4, bottom=8),
+        )
+
     # ── Layout ────────────────────────────────────────────────────────────
     def set_compact(self, compact: bool) -> None:
-        """Re-flow every tile for a narrow (``True``) or wide window."""
+        """Re-flows every tile for a compact/narrow or wide window.
+
+        Args:
+            compact: Boolean indicating if compact mode should be active.
+        """
+        self._logger.debug("Setting view compact mode to: %s", compact)
         for tile in self._tiles:
             tile.set_compact(compact)
 
     # ── ViewModel -> View ─────────────────────────────────────────────────
     def render(self) -> None:
-        """Bring every control in line with the ViewModel.
+        """Synchronizes UI controls with the current ViewModel state.
 
         Each tile ignores a value it already shows, and keeps the user's
         in-progress edit or drag, so this is cheap and safe to call often.
         """
+        self._logger.debug("Rendering SettingsView from ViewModel state.")
         vm = self._vm
         self.chat_provider.sync(vm.chat_provider)
         self.chat_base_url.sync(vm.chat_base_url)
