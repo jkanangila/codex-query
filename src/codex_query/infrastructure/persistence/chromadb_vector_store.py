@@ -272,3 +272,20 @@ class ChromaVectorStore(VectorStorePort):
 
         await asyncio.to_thread(_delete)
         logger.info("Successfully deleted vector collection for book ID %d", book_id)
+
+    @override
+    async def embedded_chunk_ids(self, book_id: int) -> frozenset[int]:
+        def _ids() -> frozenset[int]:
+            found = self._collection(book_id).get(include=[])  # ids only, no payload
+            return frozenset(int(i) for i in found["ids"])
+
+        return await asyncio.to_thread(_ids)
+
+    @override
+    async def delete_chunks(self, book_id: int, chunk_ids: Sequence[int]) -> None:
+        def _delete() -> None:
+            collection = self._collection(book_id)
+            for i in range(0, len(chunk_ids), 1000):
+                collection.delete(ids=[str(c) for c in chunk_ids[i : i + 1000]])
+
+        await asyncio.to_thread(_delete)
