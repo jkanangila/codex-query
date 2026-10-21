@@ -29,6 +29,7 @@ logger = create_logger(__name__)
 # SQLite < 3.32 allows only 999 bound variables per statement.
 _COLUMNS_PER_ROW = 6
 _MAX_ROWS_PER_STMT = 900 // _COLUMNS_PER_ROW  # 150
+_DELETE_BATCH = 500
 
 
 @dataclass(frozen=True, slots=True)
@@ -191,6 +192,26 @@ class SqlModelVectorStore(VectorStorePort):
         await self._session.exec(
             delete(ChunkEmbedding).where(col(ChunkEmbedding.book_id) == book_id)
         )
+        self._cache.drop(book_id)
+
+    @override
+    async def embedded_chunk_ids(self, book_id: int) -> frozenset[int]:
+        result = await self._session.exec(
+            select(col(ChunkEmbedding.chunk_id)).where(
+                col(ChunkEmbedding.book_id) == book_id
+            )
+        )
+        return frozenset(result.all())
+
+    @override
+    async def delete_chunks(self, book_id: int, chunk_ids: Sequence[int]) -> None:
+        ids = list(chunk_ids)
+        for i in range(0, len(ids), _DELETE_BATCH):
+            await self._session.exec(
+                delete(ChunkEmbedding).where(
+                    col(ChunkEmbedding.chunk_id).in_(ids[i : i + _DELETE_BATCH])
+                )
+            )
         self._cache.drop(book_id)
 
     # -- internals ------------------------------------------------------

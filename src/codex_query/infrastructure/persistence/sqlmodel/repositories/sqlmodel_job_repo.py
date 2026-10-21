@@ -1,5 +1,6 @@
 from collections.abc import Sequence
 from typing import override
+from uuid import UUID
 
 from sqlalchemy import delete, update
 from sqlmodel import col, select
@@ -53,7 +54,6 @@ class SqlModelIndexingJobRepository(IndexingJobPort):
             job.stage.value,
         )
         record = _to_record(job)
-        record.id = None  # let the DB assign the PK
         self._session.add(record)
         await self._session.flush()
 
@@ -72,13 +72,8 @@ class SqlModelIndexingJobRepository(IndexingJobPort):
             job: Domain IndexingJob model with updated fields.
 
         Raises:
-            ValueError: If the job instance lacks a primary key.
             JobNotFoundError: If no matching job record exists in storage.
         """
-        if job.id is None:
-            logger.error("Attempted to save an indexing job without an ID")
-            raise ValueError("Use add() for jobs without an id")
-
         logger.debug(
             "Updating indexing job ID %d (status=%s, stage=%s)",
             job.id,
@@ -145,7 +140,7 @@ class SqlModelIndexingJobRepository(IndexingJobPort):
         logger.debug("Successfully updated progress metrics for job ID %d", job_id)
 
     @override
-    async def get(self, job_id: int) -> IndexingJob | None:
+    async def get(self, job_id: UUID) -> IndexingJob | None:
         """Fetch an indexing job by its database primary key.
 
         Args:
@@ -247,7 +242,7 @@ class SqlModelIndexingJobRepository(IndexingJobPort):
         return reset_count
 
     @override
-    async def delete(self, job_id: int) -> bool:
+    async def delete(self, job_id: UUID) -> bool:
         """Delete an indexing job record from storage by its primary key ID.
 
         Args:
@@ -286,6 +281,7 @@ def _to_record(job: IndexingJob) -> IndexingJobRecord:
         done=job.done,
         total=job.total,
         checkpoint=job.checkpoint,
+        eta=job.eta,
         error=job.error,
         # map created_at / started_at / finished_at here once the domain has them
     )
@@ -306,6 +302,7 @@ def _apply(record: IndexingJobRecord, job: IndexingJob) -> None:
     record.done = job.done
     record.total = job.total
     record.checkpoint = job.checkpoint
+    record.eta = job.eta
     record.error = job.error
 
 
@@ -327,5 +324,6 @@ def _to_domain(record: IndexingJobRecord) -> IndexingJob:
         done=record.done,
         total=record.total,
         checkpoint=record.checkpoint,
+        eta=record.eta,
         error=record.error,
     )

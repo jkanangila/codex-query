@@ -1,6 +1,7 @@
-from collections.abc import Sequence
+from collections.abc import Collection, Sequence
 from typing import Any, override
 
+from sqlalchemy import delete
 from sqlalchemy.dialects.sqlite import insert
 from sqlalchemy.exc import IntegrityError
 from sqlmodel import col, select
@@ -15,6 +16,7 @@ from codex_query.infrastructure.persistence.sqlmodel.models import Chapter
 # SQLite < 3.32 allows only 999 bound variables per statement.
 _COLUMNS_PER_ROW = 6
 _MAX_ROWS_PER_STMT = 900 // _COLUMNS_PER_ROW  # 150
+_IN_BATCH = 500
 
 logger = create_logger(__name__)
 
@@ -85,7 +87,7 @@ class SqlModelChapterRepository(IChapterRepository):
         return [_to_domain(c) for c in chapters]
 
     @override
-    async def register(self, book_id: int, chapter: DomainChapter) -> int | None:
+    async def register(self, book_id: int, chapter: DomainChapter) -> int:
         """Register a single new chapter under a given book ID.
 
         Args:
@@ -118,6 +120,8 @@ class SqlModelChapterRepository(IChapterRepository):
             )
             raise ChapterAlreadyExistsError(book_id, chapter.order) from exc
 
+        if db_chapter.id is None:  # pragma: no cover - flush always assigns it
+            raise RuntimeError("Database did not assign a primary key")
         logger.info(
             "Successfully registered chapter ID %d for book ID %d",
             db_chapter.id,
@@ -188,6 +192,22 @@ class SqlModelChapterRepository(IChapterRepository):
             book_id,
         )
         return [ids_by_order[ch.order] for ch in chapters]
+
+    @override
+    async def delete_by_order(self, book_id: int, orders: Collection[int]) -> int:
+        """Delete chapters by order. Chunks and embeddings go with them through
+        ON DELETE CASCADE (PRAGMA foreign_keys = ON)."""
+        ordered = list(orders)
+        deleted = 0
+        for i in range(0, len(ordered), _IN_BATCH):
+            result = await self._session.exec(
+                delete(Chapter).where(
+                    col(Chapter.book_id) == book_id,
+                    col(Chapter.chapter_order).in_(ordered[i : i + _IN_BATCH]),
+                )
+            )
+            deleted += result.rowcount
+        return deleted
 
 
 def _to_row(chapter: DomainChapter, book_id: int) -> dict[str, Any]:

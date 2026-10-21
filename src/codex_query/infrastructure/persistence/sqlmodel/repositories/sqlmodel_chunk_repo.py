@@ -1,4 +1,4 @@
-from collections.abc import Sequence
+from collections.abc import Collection, Sequence
 from dataclasses import asdict, fields
 from typing import Any, override
 
@@ -18,6 +18,7 @@ _META_FIELDS = {f.name for f in fields(TextChunkMetadata)}
 # SQLite < 3.32 allows only 999 bound variables per statement.
 _COLUMNS_PER_ROW = 5
 _MAX_ROWS_PER_STMT = 900 // _COLUMNS_PER_ROW  # 180
+_IN_BATCH = 500
 
 logger = create_logger(__name__)
 
@@ -190,6 +191,24 @@ class SqlModelChunkRepository(IChunkRepository):
             "Deleted %d text chunk(s) for chapter ID %d", deleted_count, chapter_id
         )
         return deleted_count
+
+    @override
+    async def get_ids_for_orders(
+        self, book_id: int, orders: Collection[int]
+    ) -> Sequence[int]:
+        ordered = list(orders)
+        ids: list[int] = []
+        for i in range(0, len(ordered), _IN_BATCH):
+            result = await self._session.exec(
+                select(col(TextChunk.id))
+                .join(Chapter, col(TextChunk.chapter_id) == col(Chapter.id))
+                .where(
+                    col(Chapter.book_id) == book_id,
+                    col(Chapter.chapter_order).in_(ordered[i : i + _IN_BATCH]),
+                )
+            )
+            ids.extend(chunk_id for chunk_id in result.all() if chunk_id is not None)
+        return ids
 
 
 def _to_row(chapter_id: int, chunk: DomainTextChunk) -> dict[str, Any]:
