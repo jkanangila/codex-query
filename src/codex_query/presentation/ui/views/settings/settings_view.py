@@ -10,7 +10,7 @@ from collections.abc import Awaitable, Callable
 import flet as ft
 
 from codex_query.application.ports.logger import LoggerFactoryPort
-from codex_query.presentation.ui.formatting import build_test_result_text
+from codex_query.presentation.ui.utils.formatting import build_test_result_text
 from codex_query.presentation.ui.utils.flet_helpers import safe_update
 from codex_query.presentation.ui.viewmodels.settings_viewmodel import (
     Endpoint,

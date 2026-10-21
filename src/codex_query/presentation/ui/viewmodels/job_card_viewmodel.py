@@ -7,7 +7,7 @@ from uuid import UUID
 from codex_query.application.facade import UseCases
 from codex_query.application.ports.logger import LoggerFactoryPort
 from codex_query.domain.models.job import IndexingJob, JobStatus, Stage
-from codex_query.presentation.ui.formatting import (
+from codex_query.presentation.ui.utils.formatting import (
     job_counter_text,
     job_status_text,
 )

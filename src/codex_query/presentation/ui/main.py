@@ -10,6 +10,7 @@ from codex_query.infrastructure.logging.config import asyncio_handler
 from codex_query.infrastructure.persistence.sqlmodel.config import db_config
 from codex_query.presentation.ui.app import CodexApp
 from codex_query.presentation.ui.theme import configure_page
+from codex_query.presentation.ui.utils.set_page_alignment import set_page_alignment
 from codex_query.presentation.ui.viewmodels.app_viewmodel import AppViewModel
 from codex_query.presentation.ui.views.splash_screen import SplashScreen
 
@@ -19,7 +20,7 @@ async def _main(page: ft.Page) -> None:
     configure_page(page)
     platform = page.platform.value if page.platform else ""
 
-    page.add(SplashScreen())
+    SplashScreen(page)
 
     composition = CompositionRoot(platform, db_config)
     await composition.start()
@@ -36,6 +37,7 @@ async def _main(page: ft.Page) -> None:
         await vm.indexing.restore()
 
         page.clean()
+        set_page_alignment(page, "start")
         CodexApp(page, vm)
     except BaseException:
         await composition.aclose()
