@@ -6,7 +6,11 @@ from codex_query.application.ports.logger import LoggerFactoryPort
 from codex_query.application.ports.unit_of_work import UnitOfWorkFactory
 from codex_query.application.services.settings_service import SettingsService
 from codex_query.application.services.test_connection_service import EmbeddingFactory
-from codex_query.domain.errors import CheckpointMismatchError, EmbeddingCountError
+from codex_query.domain.errors import (
+    CheckpointMismatchError,
+    EmbeddingCountError,
+    EmbeddingMismatchError,
+)
 from codex_query.domain.models.job import IndexingJob, Stage
 from codex_query.domain.value_objects import Progress
 
@@ -62,18 +66,39 @@ class IndexingPipeline:
         self._read_uow_factory = read_uow_factory
         self._logger = logger_factory.create(__name__)
         self._clock = clock
-
-        settings = settings_service.current
-        self._embedder = embedding_factory(settings.embedding)
+        # Keep the factory and the service, not an embedder built from a settings
+        # snapshot: this pipeline lives as long as the app, and the embedding
+        # settings can change underneath it.
+        self._embedding_factory = embedding_factory
+        self._settings_service = settings_service
 
     async def __call__(self, job: IndexingJob) -> AsyncIterator[Progress]:
         async with self._read_uow_factory() as uow:
             book = await uow.books.get_by_id(job.book_id)
             assert book is not None
-            assert book.meta.embedding_model is not None
             model = book.meta.embedding_model
+            provider = book.meta.embedding_provider
+            if model is None or provider is None:
+                raise EmbeddingMismatchError(
+                    f"Book {job.book_id} has no recorded embedding model; re-index it."
+                )
             total = await uow.chunks.count_for_book(job.book_id)
             embedded = await uow.vectors.embedded_chunk_ids(job.book_id)
+
+        # Vectors are labelled with the book's model, so they must really come
+        # from it. If the settings moved on since the book was set up (a paused
+        # job outliving a settings change), embedding now would mislabel them.
+        configured = self._settings_service.current.embedding
+        if (str(configured.provider).lower(), configured.model.lower()) != (
+            provider.lower(),
+            model.lower(),
+        ):
+            raise EmbeddingMismatchError(
+                f"Book {job.book_id} was set up for {provider}/{model} but the "
+                f"embedding settings are now {configured.provider}/{configured.model}."
+                " Re-index the book."
+            )
+        embedder = self._embedding_factory(configured)
 
         if total == 0:
             yield Progress(Stage.STORE, 0, 0, 0, 0.0)
@@ -108,7 +133,7 @@ class IndexingPipeline:
             if not batch:
                 continue
 
-            vectors = await self._embedder.embed([c.text for c in batch])
+            vectors = await embedder.embed([c.text for c in batch])
             if len(vectors) != len(batch):
                 raise EmbeddingCountError(
                     f"Expected {len(batch)} vectors, got {len(vectors)}"

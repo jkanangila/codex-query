@@ -48,8 +48,16 @@ class CheckEmbeddingCompatibility:
 
     @staticmethod
     def _is_stale(book: Book, provider: LLMProvider, model: str) -> bool:
-        """Determine if a book's stored embedding metadata differs from the target."""
+        """Determine if a book's stored embedding metadata differs from the target.
+
+        A book with no recorded provider or model (it never finished its first
+        indexing) counts as stale.
+        """
+        stored_provider = book.meta.embedding_provider
+        stored_model = book.meta.embedding_model
+        if stored_provider is None or stored_model is None:
+            return True
         return (
-            provider.lower() != book.meta.embedding_provider.lower()
-            or model.lower() != book.meta.embedding_model.lower()
+            provider.lower() != stored_provider.lower()
+            or model.lower() != stored_model.lower()
         )
