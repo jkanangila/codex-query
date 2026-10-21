@@ -19,11 +19,11 @@ from codex_query.domain.models.provider import (
     LLMProvider,
 )
 from codex_query.domain.models.settings import PresetMode, Settings
-from codex_query.presentation.ui.viewmodels.events import (
+from codex_query.presentation.ui.viewmodels.events.ui_events import (
     EmbeddingChangeRequest,
     UiEvents,
 )
-from codex_query.presentation.ui.viewmodels.observable import ObservableObject
+from codex_query.presentation.ui.viewmodels.events.observable import ObservableObject
 
 CHAT_PROVIDER_OPTIONS: dict[str, LLMProvider] = {
     config.name: provider for provider, config in CHAT_PROVIDER_CONFIGS.items()
@@ -49,7 +49,16 @@ TuningKeys = Literal[
 
 @dataclass(frozen=True, slots=True)
 class _TuningSpec:
-    """Static description of one tuning slider and the setting it edits."""
+    """Static description of one tuning slider and the setting it edits.
+
+    Attributes:
+        key: The tuning attribute name on the settings model.
+        label: Human-readable display label.
+        minimum: Minimum allowable slider value.
+        maximum: Maximum allowable slider value.
+        step: Incremental step size.
+        cast: Function to convert the float value into the correct real setting type.
+    """
 
     key: TuningKeys
     label: str
@@ -62,7 +71,16 @@ class _TuningSpec:
 
 @dataclass(frozen=True, slots=True)
 class TuningSlider:
-    """Representation of a slider as the view should render it."""
+    """Representation of a slider as the view should render it.
+
+    Attributes:
+        key: The tuning attribute name.
+        label: Human-readable display label.
+        minimum: Minimum slider value.
+        maximum: Maximum slider value.
+        step: Step increment.
+        value: Current value of the slider.
+    """
 
     key: TuningKeys
     label: str
@@ -126,6 +144,13 @@ class SettingsViewModel(ObservableObject):
         events: UiEvents,
         logger_factory: LoggerFactoryPort,
     ) -> None:
+        """Initialize the settings view model.
+
+        Args:
+            use_cases: The settings facade for retrieving and updating configurations.
+            events: UI event emitter for toasts and dialog triggers.
+            logger_factory: Factory used to create a contextual logger.
+        """
         super().__init__()
         self._use_cases = use_cases
         self._events = events
@@ -142,6 +167,7 @@ class SettingsViewModel(ObservableObject):
 
         # Draft awaiting the user's answer to the re-index confirmation dialog.
         self._pending_draft: Settings | None = None
+        self._logger.info("Initialized SettingsViewModel")
 
     @property
     def settings(self) -> Settings:
@@ -169,6 +195,9 @@ class SettingsViewModel(ObservableObject):
             mutate(draft)
             await self._use_cases.update_settings(draft)
         if invalidate is not None:
+            self._logger.debug(
+                "Invalidating connection test result for endpoint: %s", invalidate
+            )
             self._test_results[invalidate] = None
         self.notify_changed()
 
@@ -180,6 +209,7 @@ class SettingsViewModel(ObservableObject):
 
     async def set_chat_base_url(self, value: str) -> None:
         """Update and save the chat service base URL."""
+        self._logger.info("Updating chat base URL")
 
         def apply(draft: Settings) -> None:
             draft.chat.base_url = value
@@ -193,6 +223,7 @@ class SettingsViewModel(ObservableObject):
 
     async def set_embedding_base_url(self, value: str) -> None:
         """Update and save the embedding service base URL."""
+        self._logger.info("Updating embedding base URL")
 
         def apply(draft: Settings) -> None:
             draft.embedding.base_url = value
@@ -206,6 +237,7 @@ class SettingsViewModel(ObservableObject):
 
     async def set_chat_api_key(self, value: str) -> None:
         """Update and save the chat API key."""
+        self._logger.info("Updating chat API key")
 
         def apply(draft: Settings) -> None:
             draft.chat.api_key = value
@@ -219,6 +251,7 @@ class SettingsViewModel(ObservableObject):
 
     async def set_embedding_api_key(self, value: str) -> None:
         """Update and save the embedding API key."""
+        self._logger.info("Updating embedding API key")
 
         def apply(draft: Settings) -> None:
             draft.embedding.api_key = value
@@ -232,6 +265,7 @@ class SettingsViewModel(ObservableObject):
 
     async def set_chat_model(self, value: str) -> None:
         """Update and save the active chat model."""
+        self._logger.info("Updating active chat model to '%s'", value)
 
         def apply(draft: Settings) -> None:
             draft.chat.model = value
@@ -245,6 +279,7 @@ class SettingsViewModel(ObservableObject):
 
     async def set_embedding_model(self, value: str) -> None:
         """Update, or stage for confirmation, the active embedding model."""
+        self._logger.info("Setting active embedding model to '%s'", value.strip())
 
         def apply(draft: Settings) -> None:
             draft.embedding.model = value.strip()
@@ -266,6 +301,7 @@ class SettingsViewModel(ObservableObject):
 
     async def select_chat_provider(self, key: str) -> None:
         """Select and persist a new chat service provider."""
+        self._logger.info("Selecting chat provider option: '%s'", key)
         provider = CHAT_PROVIDER_OPTIONS[key]
 
         def apply(draft: Settings) -> None:
@@ -287,6 +323,7 @@ class SettingsViewModel(ObservableObject):
 
     async def select_embedding_provider(self, key: str) -> None:
         """Select, or stage for confirmation, a new embedding provider."""
+        self._logger.info("Selecting embedding provider option: '%s'", key)
         provider = EMBEDDING_PROVIDER_OPTIONS[key]
 
         def apply(draft: Settings) -> None:
@@ -312,6 +349,7 @@ class SettingsViewModel(ObservableObject):
 
     async def select_preset(self, key: str) -> None:
         """Switch and persist a configuration preset mode."""
+        self._logger.info("Switching configuration preset mode to '%s'", key)
         mode = PresetMode(key)
 
         def apply(draft: Settings) -> None:
@@ -342,6 +380,7 @@ class SettingsViewModel(ObservableObject):
         Raises:
             KeyError: For an unknown slider key.
         """
+        self._logger.info("Setting tuning parameter '%s' to %s", key, value)
         spec = _SPECS_BY_KEY[key]
 
         def apply(draft: Settings) -> None:
@@ -371,7 +410,12 @@ class SettingsViewModel(ObservableObject):
     async def test_connection(self, endpoint: Endpoint) -> None:
         """Probe an endpoint and publish testing status followed by the outcome."""
         if self._testing[endpoint]:
+            self._logger.debug(
+                "Connection test for %s already in progress; skipping", endpoint
+            )
             return
+
+        self._logger.info("Starting connection test for endpoint: %s", endpoint)
         self._testing[endpoint] = True
         self._test_results[endpoint] = None
         self.notify_changed()
@@ -381,6 +425,7 @@ class SettingsViewModel(ObservableObject):
             self._test_results[endpoint] = await self._use_cases.test_model_connection(
                 config, endpoint
             )
+            self._logger.info("Connection test for %s completed successfully", endpoint)
         except Exception:
             self._logger.exception(
                 "Connection test for %s failed unexpectedly", endpoint
@@ -393,6 +438,7 @@ class SettingsViewModel(ObservableObject):
     # ── Embedding Change ──────────────────────────────────────────────────
     async def confirm_embedding_change(self) -> None:
         """Apply the staged embedding change."""
+        self._logger.info("Confirming pending embedding change...")
         draft, self._pending_draft = self._pending_draft, None
         if draft is not None:
             async with self._lock:
@@ -402,11 +448,13 @@ class SettingsViewModel(ObservableObject):
 
     def cancel_embedding_change(self) -> None:
         """Discard the staged change, reverting UI values to current settings."""
+        self._logger.info("Canceling pending embedding change")
         self._pending_draft = None
         self.notify_changed()
 
     async def _update_embedding(self, mutate: Callable[[Settings], None]) -> None:
         """Apply an embedding edit, or stage it if books would need re-indexing."""
+        self._logger.debug("Evaluating embedding compatibility for change...")
         stale: list[StaleBook] = []
         async with self._lock:
             draft = self._use_cases.get_new_draft()
@@ -419,6 +467,10 @@ class SettingsViewModel(ObservableObject):
             if not stale:
                 await self._use_cases.update_settings(draft)
             else:
+                self._logger.warning(
+                    "Embedding change results in %d stale book(s) requiring re-indexing",  # noqa: E501
+                    len(stale),
+                )
                 self._pending_draft = draft
 
         if not stale:

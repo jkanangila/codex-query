@@ -8,5 +8,5 @@ class Tab(IntEnum):
 
     LIBRARY = 0
     CHAT = 1
-    INDEX = 2
+    INDEXING = 2
     SETTINGS = 3
