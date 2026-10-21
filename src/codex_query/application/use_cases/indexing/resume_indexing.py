@@ -1,9 +1,8 @@
 """Use case for resuming paused or interrupted indexing jobs.
 
 This module provides the `ResumeIndexing` use case, responsible for retrieving
-paused jobs, validating their resume eligibility, fetching associated book
-metadata via the unit of work, constructing the indexing job request, and
-re-invoking the `StartIndexing` use case.
+paused jobs, validating their resume eligibility, and re-invoking the
+`StartIndexing` use case.
 """
 
 from uuid import UUID
@@ -11,14 +10,14 @@ from uuid import UUID
 from codex_query.application.ports.logger import LoggerFactoryPort
 from codex_query.application.ports.unit_of_work import UnitOfWorkFactory
 from codex_query.application.use_cases.indexing.start_indexing import StartIndexing
-from codex_query.domain.value_objects import QueueIndexJobRequest
 
 
 class ResumeIndexing:
     """Use case handler for resuming paused or interrupted indexing jobs.
 
-    Retrieves jobs, checks resume conditions, looks up corresponding book details,
-    recreates the queue request, and restarts the execution flow.
+    A persisted job already has its book and chunks in the database, so resuming
+    only has to run the embedding stage again; that stage works out for itself
+    which chunks still lack a vector.
     """
 
     def __init__(
@@ -39,10 +38,7 @@ class ResumeIndexing:
         self._logger = logger_factory.create(__name__)
 
     async def __call__(self, job_id: UUID) -> None:
-        """Execute the resume indexing workflow for a given job ID.
-
-        Fetches the job, verifies if it can be resumed, retrieves its associated
-        book information, builds the indexing request, and dispatches it.
+        """Resume the job with the given ID if it is in a resumable state.
 
         Args:
             job_id: Unique identifier of the job to resume.
@@ -64,21 +60,5 @@ class ResumeIndexing:
             )
             return
 
-        self._logger.debug("Fetching book record %s for job %s", job.book_id, job_id)
-        async with self._read_uow_factory() as uow:
-            book = await uow.books.get_by_id(job.book_id)
-
-        if book is None:
-            self._logger.error(
-                "Associated book %s not found for job %s; cannot resume",
-                job.book_id,
-                job_id,
-            )
-        assert book is not None
-
-        self._logger.info("Constructing queue request and restarting job %s", job_id)
-        request = QueueIndexJobRequest(
-            title=book.title,
-            source=book.path,
-        )
-        self._start(job, request)
+        self._logger.info("Restarting job %s", job_id)
+        self._start(job)
