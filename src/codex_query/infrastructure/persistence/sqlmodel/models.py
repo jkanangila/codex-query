@@ -1,10 +1,11 @@
 from datetime import UTC, datetime
 from enum import Enum
 from typing import Any
+from uuid import UUID
 
 from sqlalchemy import JSON, DateTime, LargeBinary, Text
 from sqlalchemy import Enum as SAEnum
-from sqlalchemy.ext.mutable import MutableDict
+from sqlalchemy.ext.mutable import MutableDict, MutableList
 from sqlmodel import Field, Relationship, SQLModel, UniqueConstraint
 
 from codex_query.domain.models.job import JobStatus, Stage
@@ -61,10 +62,15 @@ class Book(SQLModel, table=True):
     series: str | None = Field(default=None, index=True)
     path: str = Field(unique=True)  # unique=True if one file == one book
     title: str
-    author: str
+    # JSON list of author names (domain: tuple[str, ...]).
+    authors: list[str] = Field(
+        default_factory=list,
+        sa_type=MutableList.as_mutable(JSON),
+    )
     file_hash: str = Field(index=True)
     size: int
     modified_ns: int
+    # Serialized BookMetadata; (de)serialization lives in the repository mapper.
     meta: dict[str, Any] = Field(
         default_factory=dict,
         sa_type=MutableDict.as_mutable(JSON),
@@ -151,10 +157,8 @@ class IndexingJob(SQLModel, table=True):
 
     __tablename__ = "indexing_job"  # pyright: ignore[reportAssignmentType]
 
-    id: int | None = Field(default=None, primary_key=True)
-    book_id: int = Field(
-        foreign_key="book.id", ondelete="CASCADE", index=True
-    )
+    id: UUID = Field(primary_key=True)
+    book_id: int = Field(foreign_key="book.id", ondelete="CASCADE", index=True)
 
     status: JobStatus = Field(
         default=JobStatus.QUEUED, sa_type=_enum(JobStatus), index=True, nullable=False
@@ -164,6 +168,7 @@ class IndexingJob(SQLModel, table=True):
     done: int = Field(default=0)
     total: int = Field(default=0)
     checkpoint: int = Field(default=0)
+    eta: float = Field(default=0.0)
 
     error: str | None = Field(default=None, sa_type=Text)
 

@@ -13,7 +13,7 @@ with create_engine(db_config.sync_url).connect() as conn:
     context.configure(
         connection=conn,
         target_metadata=target_metadata,
-        render_as_batch=False,
+        render_as_batch=True,
     )
     with context.begin_transaction():
         context.run_migrations()

@@ -3,6 +3,8 @@ from pathlib import Path
 
 from codex_query.infrastructure.paths import AppPaths
 
+_IN_BATCH = 500
+
 
 @dataclass(frozen=True, slots=True)
 class DatabaseConfig:
