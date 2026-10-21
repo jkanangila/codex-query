@@ -1,11 +1,13 @@
 from collections.abc import Awaitable, Callable, Iterator, Sequence
 from pathlib import Path
 from typing import Protocol
+from uuid import UUID
 
 from codex_query.domain.dtos.parsed_epub import ParsedDocumentDTO
 from codex_query.domain.models.document import Chapter, TextChunk
 from codex_query.domain.models.job import IndexingJob, Stage
 from codex_query.domain.models.settings import Settings
+from codex_query.domain.value_objects import QueueIndexJobRequest
 
 
 class IndexingJobPort(Protocol):
@@ -14,14 +16,14 @@ class IndexingJobPort(Protocol):
     async def update_progress(
         self, job_id: int, *, stage: Stage, done: int, total: int, checkpoint: int
     ) -> None: ...
-    async def get(self, job_id: int) -> IndexingJob | None: ...
+    async def get(self, job_id: UUID) -> IndexingJob | None: ...
     async def get_next_queued(self) -> IndexingJob | None: ...
     async def list_for_book(self, book_id: int) -> Sequence[IndexingJob]: ...
     async def list_active(
         self,
     ) -> list[IndexingJob]: ...  # everything not completed or cancelled
     async def reset_running_to_queued(self) -> int: ...
-    async def delete(self, job_id: int) -> bool: ...
+    async def delete(self, job_id: UUID) -> bool: ...
 
 
 class SettingsRepositoryPort(Protocol):
@@ -43,19 +45,19 @@ class TextChunksPort(Protocol):
 
 
 class JobRunnerPort(Protocol):
-    def submit(self, job_id: int, work: Callable[[], Awaitable[None]]) -> None: ...
+    def submit(self, job_id: UUID, work: Callable[[], Awaitable[None]]) -> None: ...
     async def cancel(
-        self, job_id: int
+        self, job_id: UUID
     ) -> None: ...  # returns once the work has stopped
-    def is_running(self, job_id: int) -> bool: ...
-
-
-class IndexingJobEventsPort(Protocol):
-    def publish(self, job: IndexingJob) -> None: ...
-    def subscribe(
-        self, listener: Callable[[IndexingJob], None]
-    ) -> Callable[[], None]: ...
+    def is_running(self, job_id: UUID) -> bool: ...
 
 
 class DocumentParserPort(Protocol):
-    async def read(self, path: Path) -> ParsedDocumentDTO: ...
+    async def read(
+        self,
+        path: Path,
+        title: str | None = None,
+        series: str | None = None,
+        number: int | None = None,
+        request: QueueIndexJobRequest | None = None,
+    ) -> ParsedDocumentDTO: ...
