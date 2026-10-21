@@ -11,12 +11,15 @@ from codex_query.infrastructure.persistence.sqlmodel.config import db_config
 from codex_query.presentation.ui.app import CodexApp
 from codex_query.presentation.ui.theme import configure_page
 from codex_query.presentation.ui.viewmodels.app_viewmodel import AppViewModel
+from codex_query.presentation.ui.views.splash_screen import SplashScreen
 
 
 async def _main(page: ft.Page) -> None:
     """Build and manage the Flet GUI lifecycle."""
     configure_page(page)
     platform = page.platform.value if page.platform else ""
+
+    page.add(SplashScreen())
 
     composition = CompositionRoot(platform, db_config)
     await composition.start()
@@ -28,7 +31,12 @@ async def _main(page: ft.Page) -> None:
 
         page.on_close = on_close
 
-        CodexApp(page, AppViewModel(composition))
+        vm = AppViewModel(composition)
+        # Restore and display interrupted indexing jobs from persistence.
+        await vm.indexing.restore()
+
+        page.clean()
+        CodexApp(page, vm)
     except BaseException:
         await composition.aclose()
         raise

@@ -82,7 +82,7 @@ def job_status_text(job: IndexingJob) -> str:
             return ""
 
 
-def job_counter_text(job: IndexingJob, eta: float | None) -> str:
+def job_counter_text(job: IndexingJob) -> str:
     """Generate a progress counter string combining chunks and estimated time.
 
     Args:
@@ -96,7 +96,7 @@ def job_counter_text(job: IndexingJob, eta: float | None) -> str:
     if not job.total:
         return ""
     counter = f"Chunk {job.done:,} / {job.total:,}"
-    remaining = fmt_eta(eta)
+    remaining = fmt_eta(job.eta)
     return f"{counter} · {remaining}" if remaining else counter
 
 

@@ -6,10 +6,12 @@ import flet as ft
 
 from codex_query.domain.value_objects import Source
 from codex_query.presentation.ui.viewmodels.app_viewmodel import AppViewModel
-from codex_query.presentation.ui.viewmodels.events import EmbeddingChangeRequest
+from codex_query.presentation.ui.viewmodels.events.ui_events import (
+    EmbeddingChangeRequest,
+)
 from codex_query.presentation.ui.viewmodels.navigation import Tab
 from codex_query.presentation.ui.views.chat.chat_view import ChatView
-from codex_query.presentation.ui.views.index.index_view import IndexView
+from codex_query.presentation.ui.views.indexing.indexing_view import IndexingView
 from codex_query.presentation.ui.views.library.library_view import LibraryView
 from codex_query.presentation.ui.views.settings.components.embedding_dialog import (
     build_embedding_dialog,
@@ -26,7 +28,7 @@ DEFAULT_WIDTH = 800  # used until Flet reports the real page width
 DESTINATIONS: dict[Tab, tuple[ft.IconData, str]] = {
     Tab.LIBRARY: (ft.Icons.LIBRARY_BOOKS_OUTLINED, "Library"),
     Tab.CHAT: (ft.Icons.CHAT_BUBBLE_OUTLINE, "Ask"),
-    Tab.INDEX: (ft.Icons.UPLOAD_FILE, "Index"),
+    Tab.INDEXING: (ft.Icons.UPLOAD_FILE, "Index"),
     Tab.SETTINGS: (ft.Icons.SETTINGS_OUTLINED, "Settings"),
 }
 
@@ -83,12 +85,12 @@ class CodexApp:
         # ── Views ─────────────────────────────────────────────────────────────
         self.library = LibraryView()
         self.chat = ChatView()
-        self.index = IndexView()
-        self.settings = SettingsView(vm.settings)
+        self.indexing = IndexingView(vm.indexing, vm.composition.logger_factory)
+        self.settings = SettingsView(vm.settings, vm.composition.logger_factory)
         self._screens: dict[Tab, _Screen] = {
             Tab.LIBRARY: self.library,
             Tab.CHAT: self.chat,
-            Tab.INDEX: self.index,
+            Tab.INDEXING: self.indexing,
             Tab.SETTINGS: self.settings,
         }
 
