@@ -10,6 +10,7 @@ import flet_secure_storage as fss
 import httpx
 
 from codex_query.application.facade import IndexingJobsFacade, SettingsFacade, UseCases
+from codex_query.application.observable.job_events import JobEvents
 from codex_query.application.pipelines.indexing_pipeline import IndexingPipeline
 from codex_query.application.pipelines.parsing_pipeline import ParsePersistPipeline
 from codex_query.application.ports.api_keys import ApiKeyRepositoryPort
@@ -78,7 +79,6 @@ from codex_query.infrastructure.security.secure_storage_api_keys import (
 from codex_query.infrastructure.settings.json_settings_repository import (
     JsonSettingsRepository,
 )
-from codex_query.application.observable.job_events import JobEvents
 
 
 class _LatestByKey[K, V]:
@@ -272,7 +272,7 @@ class CompositionRoot:
         return IndexingPipeline(
             self.uow_factory,
             self.read_uow_factory,
-            self._build_embedding,
+            self._embedding_cache.get,
             self.settings_service,
             self.logger_factory,
         )
@@ -311,7 +311,9 @@ class CompositionRoot:
             recover_interrupted_jobs=RecoverInterruptedJobs(
                 self.uow_factory, self.logger_factory
             ),
-            reindex_document=ReindexDocument(),
+            reindex_document=ReindexDocument(
+                self.read_uow_factory, start, self.logger_factory
+            ),
             resume=ResumeIndexing(self.read_uow_factory, start, self.logger_factory),
             start=start,
         )

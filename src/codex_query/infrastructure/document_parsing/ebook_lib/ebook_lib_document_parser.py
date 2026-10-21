@@ -10,7 +10,12 @@ from ebooklib import epub
 
 from codex_query.application.ports.indexing import DocumentParserPort
 from codex_query.domain.dtos.parsed_epub import ParsedDocumentDTO
-from codex_query.domain.models.document import Book, BookMetadata, Chapter
+from codex_query.domain.models.document import (
+    Book,
+    BookMetadata,
+    Chapter,
+    DocumentType,
+)
 from codex_query.domain.value_objects import QueueIndexJobRequest
 from codex_query.infrastructure.document_parsing.ebook_lib.epub_metadata import (
     extract_metadata,
@@ -129,8 +134,10 @@ class EbookLibDocumentParser(DocumentParserPort):
             if request and request.subjects
             else info.subjects,
             book_number=number or info.book_number,
+            # UNKNOWN is a non-empty string enum, so it is truthy: compare it
+            # explicitly or it would always override what the file says.
             document_type=request.document_type
-            if request and request.document_type
+            if request and request.document_type is not DocumentType.UNKNOWN
             else info.document_type,
         )
         book = Book(
