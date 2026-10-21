@@ -35,7 +35,8 @@ def build_embedding_dialog(
             controls=[
                 ft.Text(
                     "Changing the embedding model or provider means these books "
-                    "must be re-indexed before you can ask questions about them:"
+                    "must be re-indexed before you can ask questions about them. "
+                    "Re-indexing starts now and runs in the background:"
                 ),
                 ft.Container(height=4),
                 *_book_rows(request.stale_books),
@@ -43,7 +44,7 @@ def build_embedding_dialog(
         ),
         actions=[
             ft.TextButton("Cancel", on_click=cancel),
-            ft.Button("Change anyway", on_click=confirm),
+            ft.Button("Change and re-index", on_click=confirm),
         ],
     )
 
