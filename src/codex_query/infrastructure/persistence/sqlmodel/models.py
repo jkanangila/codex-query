@@ -154,7 +154,7 @@ class IndexingJob(SQLModel, table=True):
     id: int | None = Field(default=None, primary_key=True)
     book_id: int = Field(
         foreign_key="book.id", ondelete="CASCADE", index=True
-    )  # was str
+    )
 
     status: JobStatus = Field(
         default=JobStatus.QUEUED, sa_type=_enum(JobStatus), index=True, nullable=False
