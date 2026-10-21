@@ -1,5 +1,13 @@
 from dataclasses import dataclass
 
+from codex_query.application.use_cases.indexing.cancel_indexing import CancelIndexing
+from codex_query.application.use_cases.indexing.pause_indexing import PauseIndexing
+from codex_query.application.use_cases.indexing.recover_interrupted_jobs import (
+    RecoverInterruptedJobs,
+)
+from codex_query.application.use_cases.indexing.reindex_book import ReindexDocument
+from codex_query.application.use_cases.indexing.resume_indexing import ResumeIndexing
+from codex_query.application.use_cases.indexing.start_indexing import StartIndexing
 from codex_query.application.use_cases.settings.apply_budget_preset import (
     ApplyBudgetPreset,
 )
@@ -22,15 +30,12 @@ class ChatFacade:
 
 @dataclass(frozen=True, slots=True)
 class IndexingJobsFacade:
-    cancel: object
-    complete_indexing: object
-    list_indexing_jobs: object
-    pause: object
-    recover_interrupted_jobs: object
-    reindex_book: object
-    resume: object
-    start: object
-    submit_book: object
+    cancel: CancelIndexing
+    pause: PauseIndexing
+    recover_interrupted_jobs: RecoverInterruptedJobs
+    reindex_document: ReindexDocument
+    resume: ResumeIndexing
+    start: StartIndexing
 
 
 @dataclass(frozen=True, slots=True)
@@ -56,7 +61,7 @@ class SettingsFacade:
 @dataclass(frozen=True, slots=True)
 class UseCases:
     settings: SettingsFacade
+    indexing: IndexingJobsFacade
     # TODO: remove None when Facades ready
     chat: ChatFacade | None = None
-    indexing_jobs: IndexingJobsFacade | None = None
     library: LibraryFacade | None = None

@@ -9,12 +9,15 @@ from typing import Self
 import flet_secure_storage as fss
 import httpx
 
-from codex_query.application.facade import SettingsFacade, UseCases
+from codex_query.application.facade import IndexingJobsFacade, SettingsFacade, UseCases
+from codex_query.application.pipelines.indexing_pipeline import IndexingPipeline
+from codex_query.application.pipelines.parsing_pipeline import ParsePersistPipeline
 from codex_query.application.ports.api_keys import ApiKeyRepositoryPort
 from codex_query.application.ports.chat import ChatPort
 from codex_query.application.ports.embeddings import EmbeddingPort
 from codex_query.application.ports.indexing import (
     DocumentParserPort,
+    JobRunnerPort,
     SettingsRepositoryPort,
     TextChunksPort,
 )
@@ -25,6 +28,14 @@ from codex_query.application.services.settings_service import SettingsService
 from codex_query.application.services.test_connection_service import (
     ConnectionTestService,
 )
+from codex_query.application.use_cases.indexing.cancel_indexing import CancelIndexing
+from codex_query.application.use_cases.indexing.pause_indexing import PauseIndexing
+from codex_query.application.use_cases.indexing.recover_interrupted_jobs import (
+    RecoverInterruptedJobs,
+)
+from codex_query.application.use_cases.indexing.reindex_book import ReindexDocument
+from codex_query.application.use_cases.indexing.resume_indexing import ResumeIndexing
+from codex_query.application.use_cases.indexing.start_indexing import StartIndexing
 from codex_query.application.use_cases.settings.apply_budget_preset import (
     ApplyBudgetPreset,
 )
@@ -41,6 +52,7 @@ from codex_query.domain.models.settings import ServiceSettings, Settings
 from codex_query.infrastructure.document_parsing.ebook_lib.ebook_lib_document_parser import (  # noqa: E501
     EbookLibDocumentParser,
 )
+from codex_query.infrastructure.jobs.asyncio_job_runner import AsyncioJobRunner
 from codex_query.infrastructure.llm.factory import (
     create_chat_adapter,
     create_embedding_adapter,
@@ -66,6 +78,7 @@ from codex_query.infrastructure.security.secure_storage_api_keys import (
 from codex_query.infrastructure.settings.json_settings_repository import (
     JsonSettingsRepository,
 )
+from codex_query.application.observable.job_events import JobEvents
 
 
 class _LatestByKey[K, V]:
@@ -148,7 +161,6 @@ class CompositionRoot:
     # --------------------------------------------------------------------------
     @cached_property
     def database(self) -> SqlModelDatabase:
-        # Construction only; start() runs the async startup (tables/migrations).
         db = SqlModelDatabase(self.db_config)
         self._exit_stack.push_async_callback(db.shutdown)
         return db
@@ -169,7 +181,7 @@ class CompositionRoot:
         return make_uow
 
     @cached_property
-    def read_only_uow_factory(self) -> UnitOfWorkFactory:
+    def read_uow_factory(self) -> UnitOfWorkFactory:
         session_factory = self.database.session_factory
         vector_stores = self.vector_store_factory
 
@@ -206,7 +218,6 @@ class CompositionRoot:
     # --------------------------------------------------------------------------
     # HTTP Client & LLM Adapters
     # --------------------------------------------------------------------------
-    # Long read timeout configured to accommodate slow local Ollama inference
     @cached_property
     def async_http_client(self) -> httpx.AsyncClient:
         client = httpx.AsyncClient(
@@ -224,11 +235,7 @@ class CompositionRoot:
         )
 
     def chat_adapter(self) -> ChatPort:
-        """Adapter for the *current* settings; rebuilt when they change.
-
-        Call it per operation, or inject this bound method as a
-        ``Callable[[], ChatPort]`` provider. Don't hold the result long-term.
-        """
+        """Adapter for the *current* settings; rebuilt when they change."""
         return self._chat_cache.get(self.settings.chat)
 
     def embedding_adapter(self) -> EmbeddingPort:
@@ -241,6 +248,35 @@ class CompositionRoot:
             chat_factory=self._build_chat, embedding_factory=self._build_embedding
         )
 
+    @cached_property
+    def job_events(self) -> JobEvents:
+        return JobEvents()
+
+    @cached_property
+    def job_runner(self) -> JobRunnerPort:
+        return AsyncioJobRunner()
+
+    @cached_property
+    def parsing_pipeline(self) -> ParsePersistPipeline:
+        return ParsePersistPipeline(
+            self.uow_factory,
+            self.read_uow_factory,
+            self.document_parser,
+            self.text_chunk_service,
+            self.settings_service,
+            self.logger_factory,
+        )
+
+    @cached_property
+    def indexing_pipeline(self) -> IndexingPipeline:
+        return IndexingPipeline(
+            self.uow_factory,
+            self.read_uow_factory,
+            self._build_embedding,
+            self.settings_service,
+            self.logger_factory,
+        )
+
     # --------------------------------------------------------------------------
     # Use cases
     # --------------------------------------------------------------------------
@@ -249,13 +285,35 @@ class CompositionRoot:
         settings_facade = SettingsFacade(
             apply_budget_preset=ApplyBudgetPreset(self.settings_service),
             check_embedding_compatibility=CheckEmbeddingCompatibility(
-                self.read_only_uow_factory
+                self.read_uow_factory
             ),
-            # Takes factories so it can test candidate settings from the form
-            # before they are saved, not the already-saved ones.
             get_current=GetCurrentSettings(self.settings_service),
             get_new_draft=GetDraftSettings(self.settings_service),
             test_model_connection=TestConnection(self.connection_test_service),
             update_settings=UpdateSettings(self.settings_service),
         )
-        return UseCases(settings=settings_facade)
+
+        start = StartIndexing(
+            self.uow_factory,
+            self.job_runner,
+            self.job_events,
+            self.parsing_pipeline,
+            self.indexing_pipeline,
+            self.logger_factory,
+        )
+        indexing_jobs = IndexingJobsFacade(
+            cancel=CancelIndexing(
+                self.uow_factory, self.job_runner, self.job_events, self.logger_factory
+            ),
+            pause=PauseIndexing(
+                self.uow_factory, self.job_runner, self.job_events, self.logger_factory
+            ),
+            recover_interrupted_jobs=RecoverInterruptedJobs(
+                self.uow_factory, self.logger_factory
+            ),
+            reindex_document=ReindexDocument(),
+            resume=ResumeIndexing(self.read_uow_factory, start, self.logger_factory),
+            start=start,
+        )
+
+        return UseCases(settings=settings_facade, indexing=indexing_jobs)
