@@ -1,15 +1,16 @@
 from codex_query.di.bootstrap import CompositionRoot
 from codex_query.domain.models.job import IndexingJob
+from codex_query.presentation.ui.viewmodels.events.observable import ObservableObject
 from codex_query.presentation.ui.viewmodels.events.ui_events import UiEvents
 from codex_query.presentation.ui.viewmodels.indexing_viewmodel import IndexingViewModel
 from codex_query.presentation.ui.viewmodels.navigation import Tab
-from codex_query.presentation.ui.viewmodels.events.observable import ObservableObject
 from codex_query.presentation.ui.viewmodels.settings_viewmodel import SettingsViewModel
 
 
 class AppViewModel(ObservableObject):
     def __init__(self, composition: CompositionRoot) -> None:
         super().__init__()
+        self._logger = composition.logger_factory.create(__name__)
         self.composition = composition
         self.events = UiEvents()
         self._tab = Tab.LIBRARY
@@ -28,6 +29,7 @@ class AppViewModel(ObservableObject):
             self.composition.use_cases.settings,
             self.events,
             composition.logger_factory,
+            on_reindex=self.indexing.reindex,
         )
 
         # TODO: uncomment when library view is implemented

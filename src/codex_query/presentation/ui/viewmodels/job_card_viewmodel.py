@@ -136,7 +136,15 @@ class JobCardViewModel(ObservableObject):
         self._on_discard(self)
 
     # ── updates (called by the owner) ─────────────────────────────────────
-    def refresh(self) -> None:
-        """The underlying job changed; tell the view to redraw."""
+    def refresh(self, job: IndexingJob | None = None) -> None:
+        """The underlying job changed; tell the view to redraw.
+
+        Args:
+            job: The latest state of the job. Pass it whenever you have it: the
+                pipelines return new job objects, so the one this card was created
+                with goes stale as soon as the book is registered.
+        """
         self._logger.debug("Refreshing view model state for job %s", self.job_id)
+        if job is not None:
+            self._job = job
         self.notify_changed()

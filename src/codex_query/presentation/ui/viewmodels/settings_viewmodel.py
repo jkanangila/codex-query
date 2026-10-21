@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import asyncio
-from collections.abc import Callable
+from collections.abc import Awaitable, Callable, Sequence
 from dataclasses import dataclass
 from typing import Literal
 
@@ -19,11 +19,11 @@ from codex_query.domain.models.provider import (
     LLMProvider,
 )
 from codex_query.domain.models.settings import PresetMode, Settings
+from codex_query.presentation.ui.viewmodels.events.observable import ObservableObject
 from codex_query.presentation.ui.viewmodels.events.ui_events import (
     EmbeddingChangeRequest,
     UiEvents,
 )
-from codex_query.presentation.ui.viewmodels.events.observable import ObservableObject
 
 CHAT_PROVIDER_OPTIONS: dict[str, LLMProvider] = {
     config.name: provider for provider, config in CHAT_PROVIDER_CONFIGS.items()
@@ -143,6 +143,7 @@ class SettingsViewModel(ObservableObject):
         use_cases: SettingsFacade,
         events: UiEvents,
         logger_factory: LoggerFactoryPort,
+        on_reindex: Callable[[Sequence[int]], Awaitable[None]] | None = None,
     ) -> None:
         """Initialize the settings view model.
 
@@ -150,10 +151,14 @@ class SettingsViewModel(ObservableObject):
             use_cases: The settings facade for retrieving and updating configurations.
             events: UI event emitter for toasts and dialog triggers.
             logger_factory: Factory used to create a contextual logger.
+            on_reindex: Called with the ids of the stale books once the user has
+                confirmed an embedding change. Settings knows nothing about
+                indexing; the app view model supplies this.
         """
         super().__init__()
         self._use_cases = use_cases
         self._events = events
+        self._on_reindex = on_reindex
         self._logger = logger_factory.create(__name__)
 
         # Serializes read-modify-write cycles on the settings (see ``_update``).
@@ -165,8 +170,10 @@ class SettingsViewModel(ObservableObject):
         }
         self._testing: dict[Endpoint, bool] = {"chat": False, "embedding": False}
 
-        # Draft awaiting the user's answer to the re-index confirmation dialog.
+        # Draft awaiting the user's answer to the re-index confirmation dialog,
+        # with the books that change would leave stale.
         self._pending_draft: Settings | None = None
+        self._pending_stale: list[StaleBook] = []
         self._logger.info("Initialized SettingsViewModel")
 
     @property
@@ -437,19 +444,32 @@ class SettingsViewModel(ObservableObject):
 
     # ── Embedding Change ──────────────────────────────────────────────────
     async def confirm_embedding_change(self) -> None:
-        """Apply the staged embedding change."""
+        """Apply the staged embedding change and re-index the books it affects."""
         self._logger.info("Confirming pending embedding change...")
         draft, self._pending_draft = self._pending_draft, None
+        stale, self._pending_stale = self._pending_stale, []
         if draft is not None:
+            # Save first: the re-index jobs read the new settings when they run.
             async with self._lock:
                 await self._use_cases.update_settings(draft)
             self._test_results["embedding"] = None
         self.notify_changed()
 
+        book_ids = [book.id for book in stale if book.id is not None]
+        if draft is not None and book_ids and self._on_reindex is not None:
+            try:
+                await self._on_reindex(book_ids)
+            except Exception:
+                self._logger.exception("Could not start re-indexing")
+                self._events.toast.emit(
+                    "Settings saved, but re-indexing could not be started."
+                )
+
     def cancel_embedding_change(self) -> None:
         """Discard the staged change, reverting UI values to current settings."""
         self._logger.info("Canceling pending embedding change")
         self._pending_draft = None
+        self._pending_stale = []
         self.notify_changed()
 
     async def _update_embedding(self, mutate: Callable[[Settings], None]) -> None:
@@ -472,6 +492,7 @@ class SettingsViewModel(ObservableObject):
                     len(stale),
                 )
                 self._pending_draft = draft
+                self._pending_stale = stale
 
         if not stale:
             self._test_results["embedding"] = None
