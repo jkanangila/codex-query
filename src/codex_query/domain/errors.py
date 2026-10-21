@@ -80,3 +80,12 @@ class SecureStorageUnavailableError(Exception):
     On Linux this means the Secret Service dependencies (libsecret and a running
     keyring such as gnome-keyring or KWallet) are missing or not reachable.
     """
+
+
+class IndexingError(Exception): ...
+
+
+class CheckpointMismatchError(IndexingError): ...
+
+
+class EmbeddingCountError(IndexingError): ...

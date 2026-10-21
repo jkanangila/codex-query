@@ -1,5 +1,6 @@
 from dataclasses import dataclass
 from enum import StrEnum, auto
+from uuid import UUID
 
 
 class JobStatus(StrEnum):
@@ -42,13 +43,14 @@ class InvalidTransition(Exception): ...
 
 @dataclass(slots=True)
 class IndexingJob:
-    id: int | None
+    id: UUID
     book_id: int
     status: JobStatus = JobStatus.QUEUED
     stage: Stage = Stage.PARSE
     done: int = 0
     total: int = 0
     checkpoint: int = 0  # chunks durably stored; resume starts here
+    eta: float = 0.0
     error: str | None = None
 
     def _to(self, new: JobStatus) -> None:
@@ -73,8 +75,10 @@ class IndexingJob:
         self._to(JobStatus.FAILED)
         self.error = reason
 
-    def record(self, stage: Stage, done: int, total: int, checkpoint: int) -> None:
-        self.stage, self.done, self.total = stage, done, total
+    def record(
+        self, stage: Stage, done: int, total: int, checkpoint: int, eta: float
+    ) -> None:
+        self.stage, self.done, self.total, self.eta = stage, done, total, eta
         self.checkpoint = max(self.checkpoint, checkpoint)  # never moves backwards
 
     @property
@@ -84,3 +88,8 @@ class IndexingJob:
     @property
     def is_active(self) -> bool:
         return self.status not in TERMINAL_STATUSES
+
+    @property
+    def fraction(self) -> float:
+        """Completion in ``[0, 1]``; ``0.0`` while the total is still unknown."""
+        return self.done / self.total if self.total else 0.0
