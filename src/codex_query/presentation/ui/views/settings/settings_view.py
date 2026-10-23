@@ -10,8 +10,8 @@ from collections.abc import Awaitable, Callable
 import flet as ft
 
 from codex_query.application.ports.logger import LoggerFactoryPort
-from codex_query.presentation.ui.utils.formatting import build_test_result_text
 from codex_query.presentation.ui.utils.flet_helpers import safe_update
+from codex_query.presentation.ui.utils.formatting import build_test_result_text
 from codex_query.presentation.ui.viewmodels.settings_viewmodel import (
     Endpoint,
     SettingsViewModel,
@@ -33,7 +33,7 @@ from codex_query.presentation.ui.views.settings.settings_text import TEXT
 
 # Width of the settings column, in 12-column grid units, per window width. On wide
 # windows it stays a comfortable reading width instead of stretching edge to edge.
-_CONTENT_COLUMNS = {
+_CONTENT_COLUMNS: dict[str | ft.ResponsiveRowBreakpoint, ft.Number] = {
     "xs": 12,
     "md": 10,
     "lg": 9,
@@ -285,15 +285,18 @@ class SettingsView:
         """
         self._logger.debug("Rendering SettingsView from ViewModel state.")
         vm = self._vm
-        self.chat_provider.sync(vm.chat_provider)
-        self.chat_base_url.sync(vm.chat_base_url)
-        self.chat_model.sync(vm.chat_model)
-        self.chat_api_key.sync(vm.chat_api_key)
 
-        self.embedding_provider.sync(vm.embedding_provider)
-        self.embedding_base_url.sync(vm.embedding_base_url)
-        self.embedding_model.sync(vm.embedding_model)
-        self.embedding_api_key.sync(vm.embedding_api_key)
+        for field, value in (
+            (self.chat_provider, vm.chat_provider),
+            (self.chat_base_url, vm.chat_base_url),
+            (self.chat_model, vm.chat_model),
+            (self.chat_api_key, vm.chat_api_key),
+            (self.embedding_provider, vm.embedding_provider),
+            (self.embedding_base_url, vm.embedding_base_url),
+            (self.embedding_model, vm.embedding_model),
+            (self.embedding_api_key, vm.embedding_api_key),
+        ):
+            field.sync(value)
 
         self.preset.set(vm.preset_key)
         for state in vm.tuning:

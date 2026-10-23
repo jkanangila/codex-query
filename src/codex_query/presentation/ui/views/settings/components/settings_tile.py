@@ -1,6 +1,6 @@
 import asyncio
 from collections.abc import Awaitable, Callable, Sequence
-from typing import Literal
+from typing import Literal, Protocol
 
 import flet as ft
 
@@ -46,6 +46,10 @@ class SectionHeader(ft.Container):
 
 
 # ──────────────────────────────────────────────────────────────────────
+class SettingTileProtocl(Protocol):
+    def syn(self, value: str | float) -> None: ...
+
+
 class SettingTile(ft.Container):
     """Base row: title + subtitle on the left, optional trailing control.
 
