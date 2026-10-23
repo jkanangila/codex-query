@@ -9,7 +9,12 @@ from typing import Self
 import flet_secure_storage as fss
 import httpx
 
-from codex_query.application.facade import IndexingJobsFacade, SettingsFacade, UseCases
+from codex_query.application.facade import (
+    IndexingJobsFacade,
+    LibraryFacade,
+    SettingsFacade,
+    UseCases,
+)
 from codex_query.application.observable.job_events import JobEvents
 from codex_query.application.pipelines.indexing_pipeline import IndexingPipeline
 from codex_query.application.pipelines.parsing_pipeline import ParsePersistPipeline
@@ -37,6 +42,9 @@ from codex_query.application.use_cases.indexing.recover_interrupted_jobs import 
 from codex_query.application.use_cases.indexing.reindex_book import ReindexDocument
 from codex_query.application.use_cases.indexing.resume_indexing import ResumeIndexing
 from codex_query.application.use_cases.indexing.start_indexing import StartIndexing
+from codex_query.application.use_cases.library.list_books import ListBooks
+from codex_query.application.use_cases.library.search_books import SearchBooks
+from codex_query.application.use_cases.library.select_ask_scope import SelectAskScope
 from codex_query.application.use_cases.settings.apply_budget_preset import (
     ApplyBudgetPreset,
 )
@@ -317,5 +325,12 @@ class CompositionRoot:
             resume=ResumeIndexing(self.read_uow_factory, start, self.logger_factory),
             start=start,
         )
+        library = LibraryFacade(
+            list_books=ListBooks(self.read_uow_factory, self.logger_factory),
+            search_books=SearchBooks(self.logger_factory),
+            select_ask_scope=SelectAskScope(),
+        )
 
-        return UseCases(settings=settings_facade, indexing=indexing_jobs)
+        return UseCases(
+            settings=settings_facade, indexing=indexing_jobs, library=library
+        )

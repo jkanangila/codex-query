@@ -8,6 +8,9 @@ from codex_query.application.use_cases.indexing.recover_interrupted_jobs import 
 from codex_query.application.use_cases.indexing.reindex_book import ReindexDocument
 from codex_query.application.use_cases.indexing.resume_indexing import ResumeIndexing
 from codex_query.application.use_cases.indexing.start_indexing import StartIndexing
+from codex_query.application.use_cases.library.list_books import ListBooks
+from codex_query.application.use_cases.library.search_books import SearchBooks
+from codex_query.application.use_cases.library.select_ask_scope import SelectAskScope
 from codex_query.application.use_cases.settings.apply_budget_preset import (
     ApplyBudgetPreset,
 )
@@ -40,12 +43,9 @@ class IndexingJobsFacade:
 
 @dataclass(frozen=True, slots=True)
 class LibraryFacade:
-    delete_book: object
-    get_book: object
-    list_books: object
-    rename_book: object
-    search_books: object
-    select_ask_scope: object
+    list_books: ListBooks
+    search_books: SearchBooks
+    select_ask_scope: SelectAskScope
 
 
 @dataclass(frozen=True, slots=True)
@@ -62,6 +62,6 @@ class SettingsFacade:
 class UseCases:
     settings: SettingsFacade
     indexing: IndexingJobsFacade
+    library: LibraryFacade
     # TODO: remove None when Facades ready
     chat: ChatFacade | None = None
-    library: LibraryFacade | None = None
