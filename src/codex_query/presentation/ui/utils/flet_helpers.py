@@ -19,7 +19,7 @@ def safe_update(control: ft.Control) -> None:
 
 def bind(
     command: Callable[..., object], *args: object
-) -> Callable[[ft.ControlEvent], None]:
+) -> Callable[[ft.Event[ft.Control]], None]:
     """Adapt a ViewModel command to a Flet event handler.
 
     Flet calls handlers with the event as the only argument; ViewModel commands don't
@@ -31,7 +31,7 @@ def bind(
     ``async def`` handler, because Flet runs plain functions in a worker thread.
     """
 
-    def handler(_e: ft.ControlEvent) -> None:
+    def handler(_e: ft.Event[ft.Control]) -> None:
         command(*args)
 
     return handler

@@ -83,7 +83,7 @@ class CodexApp:
         self.body = ft.Container(expand=True)
 
         # ── Views ─────────────────────────────────────────────────────────────
-        self.library = LibraryView()
+        self.library = LibraryView(vm.library, vm.composition.logger_factory)
         self.chat = ChatView()
         self.indexing = IndexingView(vm.indexing, vm.composition.logger_factory)
         self.settings = SettingsView(vm.settings, vm.composition.logger_factory)

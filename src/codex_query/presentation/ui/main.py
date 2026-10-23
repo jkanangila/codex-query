@@ -32,9 +32,8 @@ async def _main(page: ft.Page) -> None:
 
         page.on_close = on_close
 
-        vm = AppViewModel(composition)
-        # Restore and display interrupted indexing jobs from persistence.
-        await vm.indexing.restore()
+        # create app viewmodel and initialize resources
+        vm = await AppViewModel.create(composition)
 
         page.clean()
         set_page_alignment(page, "start")
