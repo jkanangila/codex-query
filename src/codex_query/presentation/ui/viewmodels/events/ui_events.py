@@ -3,11 +3,11 @@
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 
+from codex_query.application.observable.signal import Signal
 from codex_query.application.use_cases.settings.check_embedding_compatibility import (
     StaleBook,
 )
 from codex_query.domain.value_objects import Source
-from codex_query.application.observable.signal import Signal
 
 
 @dataclass(frozen=True, slots=True)

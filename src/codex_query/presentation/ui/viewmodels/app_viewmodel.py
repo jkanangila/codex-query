@@ -1,8 +1,11 @@
+import asyncio
+
 from codex_query.di.bootstrap import CompositionRoot
 from codex_query.domain.models.job import IndexingJob
 from codex_query.presentation.ui.viewmodels.events.observable import ObservableObject
 from codex_query.presentation.ui.viewmodels.events.ui_events import UiEvents
 from codex_query.presentation.ui.viewmodels.indexing_viewmodel import IndexingViewModel
+from codex_query.presentation.ui.viewmodels.library_viewmodel import LibraryViewModel
 from codex_query.presentation.ui.viewmodels.navigation import Tab
 from codex_query.presentation.ui.viewmodels.settings_viewmodel import SettingsViewModel
 
@@ -17,7 +20,12 @@ class AppViewModel(ObservableObject):
 
         # Placeholders (instances, so the attributes are typed) until the real
         # Library / Chat / Index ViewModels exist.
-        self.library = ObservableObject()
+        self.library = LibraryViewModel(
+            composition.use_cases,
+            on_select=self.select_books,
+            on_add_book=self.go_to_index,
+            logger_factory=composition.logger_factory,
+        )
         self.chat = ObservableObject()
         self.indexing = IndexingViewModel(
             composition.use_cases,
@@ -32,8 +40,19 @@ class AppViewModel(ObservableObject):
             on_reindex=self.indexing.reindex,
         )
 
-        # TODO: uncomment when library view is implemented
-        # self.indexing.job_completed.subscribe(self._on_job_completed)
+        self.indexing.job_completed.subscribe(self._on_job_completed)
+
+    @classmethod
+    async def create(cls, composition: CompositionRoot) -> "AppViewModel":
+        vm = cls(composition)
+
+        # Restore and display interrupted indexing jobs from persistence.
+        await vm.indexing.restore()
+        books = await vm.composition.use_cases.library.list_books()
+
+        vm.library.set_books(list(books))
+
+        return vm
 
     @property
     def tab(self) -> Tab:
@@ -49,9 +68,17 @@ class AppViewModel(ObservableObject):
 
     # ── coordination ──────────────────────────────────────────────────────
     # TODO: implement together with chat and library views
-    def select_books(self, ids: list[str]) -> None:
+    def select_books(self, ids: list[int]) -> None:
         raise NotImplementedError
 
-    # TODO: implement when library is ready
-    def _on_job_completed(self, job: IndexingJob) -> None:
-        raise NotImplementedError
+    async def _on_job_completed(self, job: IndexingJob) -> None:
+        books = await self.composition.use_cases.library.list_books()
+        self.library.set_books(list(books))
+
+        book = next((b for b in books if b.id == job.id), None)
+        if book is not None:
+            self.events.toast.emit(f"“{book.title}” is ready to ask")
+        else:
+            self.events.toast.emit(
+                f"Error! Job ({job.id}) completed but no book was added to the database"
+            )
