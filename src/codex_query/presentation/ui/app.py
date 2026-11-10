@@ -1,3 +1,12 @@
+"""Main application shell view for the Codex Query Flet UI.
+
+This module provides the `CodexApp` class, which handles dynamic responsive layout
+arrangements (compact, medium, expanded), screen routing, navigation bars/rails,
+and global UI requests such as toasts, source excerpts, and embedding dialogs.
+"""
+
+from __future__ import annotations
+
 from dataclasses import dataclass
 from enum import StrEnum
 from typing import Protocol
@@ -34,47 +43,69 @@ DESTINATIONS: dict[Tab, tuple[ft.IconData, str]] = {
 
 
 class SizeClass(StrEnum):
+    """Enumeration representing responsive window size classifications."""
+
     COMPACT = "compact"
     MEDIUM = "medium"
     EXPANDED = "expanded"
 
 
 class _Screen(Protocol):
-    """Anything that can be shown as the body of the shell."""
+    """Protocol for anything that can be shown as the body of the shell."""
 
     @property
-    def root(self) -> ft.Control: ...
+    def root(self) -> ft.Control:
+        """ft.Control: The root control of the screen."""
+        ...
 
 
 @dataclass(frozen=True, slots=True)
 class _Layout:
-    """How the shell is arranged at the current window width."""
+    """Represents how the shell is arranged at the current window width.
+
+    Attributes:
+        size_class (SizeClass): The current window size category.
+        with_sources (bool): Whether there is enough room for the sources side panel.
+    """
 
     size_class: SizeClass
     with_sources: bool
 
     @property
     def library_is_pane(self) -> bool:
-        """Whether the library is a permanent pane rather than a destination."""
+        """bool: Whether the library is a permanent pane rather than a destination."""
         return self.size_class is SizeClass.EXPANDED
 
     @property
     def nav_tabs(self) -> tuple[Tab, ...]:
-        """The tabs offered by the navigation bar / rail, in display order."""
+        """tuple[Tab, ...]: Tabs offered by the navigation bar/rail in display order."""
         if self.library_is_pane:
             return tuple(tab for tab in Tab if tab is not Tab.LIBRARY)
         return tuple(Tab)
 
 
 class CodexApp:
-    """The shell *view*: builds the screens, lays them out for the current width, and
-    carries out the UI requests (toasts, dialogs) that ViewModels emit.
+    """The shell view: builds screens, lays them out, and carries out UI requests.
 
     All state and navigation logic live in :class:`AppViewModel`; this class only
     decides how the current ``vm.tab`` is drawn at the current window size.
+
+    Attributes:
+        page (ft.Page): The root Flet page instance.
+        body (ft.Container): Container hosting the active screen content.
+        library (LibraryView): The library view instance.
+        chat (ChatView): The chat view instance.
+        indexing (IndexingView): The indexing view instance.
+        settings (SettingsView): The settings view instance.
     """
 
     def __init__(self, page: ft.Page, vm: AppViewModel) -> None:
+        """Initialize the CodexApp shell view, views, and event subscriptions.
+
+        Args:
+            page (ft.Page): The root Flet page instance.
+            vm (AppViewModel): The central application view model.
+        """
         self.page = page
         self._logger = vm.composition.logger_factory.create(__name__)
 
@@ -84,6 +115,7 @@ class CodexApp:
         self._rail: ft.NavigationRail | None = None
         self.body = ft.Container(expand=True)
 
+        self._logger.info("Initializing application views...")
         # ── Views ─────────────────────────────────────────────────────────────
         self.library = LibraryView(vm.library, vm.composition.logger_factory)
         self.chat = ChatView(vm.chat)
@@ -105,9 +137,16 @@ class CodexApp:
         # ──────────────────────────────────────────────────────────────────────
         page.on_resize = self._on_resize
         self._build_layout()
+        self._logger.info("CodexApp shell layout successfully built.")
 
     # ── Layout ────────────────────────────────────────────────────────────
     def _current_layout(self) -> _Layout:
+        """Determine the current layout configuration based on window width.
+
+        Returns:
+            _Layout: The evaluated layout parameters including size class
+            and sources visibility.
+        """
         width = self.page.width or DEFAULT_WIDTH
         if width < COMPACT_MAX_WIDTH:
             size_class = SizeClass.COMPACT
@@ -118,10 +157,17 @@ class CodexApp:
         return _Layout(size_class, with_sources=width >= SOURCES_MIN_WIDTH)
 
     def _on_resize(self, _e: ft.PageResizeEvent) -> None:
-        if self._current_layout() != self._layout:
+        """Handle page resize events by rebuilding layout if size class changes."""
+        new_layout = self._current_layout()
+        if new_layout != self._layout:
+            self._logger.info(
+                f"Window resized. Layout changing from {self._layout.size_class} "
+                f"to {new_layout.size_class}."
+            )
             self._build_layout()
 
     def _build_layout(self) -> None:
+        """Construct the responsive UI layout according to the current window size."""
         self._layout = self._current_layout()
         self.page.clean()
         self._nav_bar = self._rail = None
@@ -135,13 +181,21 @@ class CodexApp:
         self._show_tab()
 
     def _effective_tab(self) -> Tab:
-        """The tab to show: ``vm.tab``, unless this layout has no such destination."""
-        # On expanded layouts the library is always visible as a pane, so it is
-        # never the body; show the chat instead.
+        """Get the tab to show.
+
+        Returns:
+            Tab: The active tab, or falls back to Chat if the current layout
+            does not support displaying the library destination as a tab.
+        """
         tab = self._vm.tab
         return tab if tab in self._layout.nav_tabs else Tab.CHAT
 
     def _compact_layout(self) -> ft.Control:
+        """Build the compact navigation layout for smaller mobile/narrow screens.
+
+        Returns:
+            ft.Control: The root control for the compact layout.
+        """
         nav_tabs = self._layout.nav_tabs
         bar = ft.NavigationBar(
             selected_index=nav_tabs.index(self._effective_tab()),
@@ -159,6 +213,11 @@ class CodexApp:
         return ft.Column([self.body, bar], expand=True, spacing=0)
 
     def _wide_layout(self) -> ft.Control:
+        """Build the wide navigation layout using a navigation rail and side panes.
+
+        Returns:
+            ft.Control: The root control for the wide layout.
+        """
         nav_tabs = self._layout.nav_tabs
         rail = ft.NavigationRail(
             selected_index=nav_tabs.index(self._effective_tab()),
@@ -189,8 +248,9 @@ class CodexApp:
         return ft.Row(row, expand=True, spacing=0)
 
     def _show_tab(self) -> None:
-        """Mount the screen for ``vm.tab`` and sync the navigation controls."""
+        """Mount the screen for the active tab and synchronize navigation controls."""
         tab = self._effective_tab()
+        self._logger.debug(f"Displaying tab view: {tab}")
         index = self._layout.nav_tabs.index(tab)
         self.body.content = self._screens[tab].root
         self.chat.sources.root.visible = tab == Tab.CHAT
@@ -202,9 +262,21 @@ class CodexApp:
 
     # ── UI requests from ViewModels ───────────────────────────────────────
     def _toast(self, message: str) -> None:
+        """Display a transient toast message via a SnackBar.
+
+        Args:
+            message (str): The text message to display.
+        """
+        self._logger.info(f"Showing toast notification: '{message}'")
         self.page.show_dialog(ft.SnackBar(content=ft.Text(message)))
 
     def _show_source(self, source: SourceRef) -> None:
+        """Display an AlertDialog showing source reference details and excerpts.
+
+        Args:
+            source (SourceRef): The source reference object to display.
+        """
+        self._logger.info(f"Showing source reference dialog: '{source.label}'")
         self.page.show_dialog(
             ft.AlertDialog(
                 title=ft.Text(source.label),
@@ -214,4 +286,10 @@ class CodexApp:
         )
 
     def _show_embedding_dialog(self, request: EmbeddingChangeRequest) -> None:
+        """Display the embedding configuration dialog.
+
+        Args:
+            request (EmbeddingChangeRequest): The embedding change request parameters.
+        """
+        self._logger.info("Opening embedding change dialog.")
         self.page.show_dialog(build_embedding_dialog(self.page, request))
