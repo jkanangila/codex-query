@@ -1,5 +1,6 @@
 from dataclasses import dataclass
 
+from codex_query.application.use_cases.chat.ask_question import AskQuestionUseCase
 from codex_query.application.use_cases.indexing.cancel_indexing import CancelIndexing
 from codex_query.application.use_cases.indexing.pause_indexing import PauseIndexing
 from codex_query.application.use_cases.indexing.recover_interrupted_jobs import (
@@ -27,8 +28,7 @@ from codex_query.application.use_cases.settings.update_settings import UpdateSet
 
 @dataclass(frozen=True, slots=True)
 class ChatFacade:
-    ask_question: object
-    get_source_passage: object
+    ask_question: AskQuestionUseCase
 
 
 @dataclass(frozen=True, slots=True)
@@ -63,5 +63,4 @@ class UseCases:
     settings: SettingsFacade
     indexing: IndexingJobsFacade
     library: LibraryFacade
-    # TODO: remove None when Facades ready
-    chat: ChatFacade | None = None
+    chat: ChatFacade
