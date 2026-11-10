@@ -7,6 +7,7 @@ the UI presentation layer.
 from codex_query.domain.models.connection import ConnectionTestResult
 from codex_query.domain.models.document import Book
 from codex_query.domain.models.job import IndexingJob, JobStatus
+from codex_query.domain.models.rag import SourceRef
 
 NO_SCOPE_TITLE: str = "Pick a book from the library"
 
@@ -111,3 +112,8 @@ def build_test_result_text(result: ConnectionTestResult | None) -> str:
     if result.ok:
         return f"✓ {result.latency_ms:.0f} ms [{result.message}]"
     return f"✗ {result.message}" if result.message else "✗ Unreachable"
+
+
+def source_heading(source: SourceRef) -> str:
+    """Heading of a source card, e.g. ``"Ch. 9 · p.118 · 0.81"``."""
+    return f"{source.label} · {source.distance:.2f}"

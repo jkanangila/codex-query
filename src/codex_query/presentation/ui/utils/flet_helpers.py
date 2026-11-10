@@ -1,7 +1,8 @@
 """Small Flet utilities."""
 
 import contextlib
-from collections.abc import Callable
+from collections.abc import Awaitable, Callable
+from typing import Any
 
 import flet as ft
 
@@ -18,8 +19,10 @@ def safe_update(control: ft.Control) -> None:
 
 
 def bind(
-    command: Callable[..., object], *args: object
-) -> Callable[[ft.Event[ft.Control]], None]:
+    command: Callable[..., object],
+    *args: object,
+    **kwargs: object,
+) -> Callable[[ft.Event[Any]], None]:
     """Adapt a ViewModel command to a Flet event handler.
 
     Flet calls handlers with the event as the only argument; ViewModel commands don't
@@ -31,7 +34,27 @@ def bind(
     ``async def`` handler, because Flet runs plain functions in a worker thread.
     """
 
-    def handler(_e: ft.Event[ft.Control]) -> None:
-        command(*args)
+    def handler(e: ft.Event[Any]) -> None:
+        command(*args, **kwargs)
+
+    return handler
+
+
+def bind_async(
+    command: Callable[..., Awaitable[object]],
+    *args: object,
+    **kwargs: object,
+) -> Callable[[ft.Event[Any]], Awaitable[None]]:
+    """Adapt an async ViewModel command to a Flet event handler.
+
+    Flet calls handlers with the event as the only argument.
+    This adapter ignores the event and awaits the ViewModel command.
+
+    Use for commands that interact with asyncio tasks or perform
+    asynchronous operations.
+    """
+
+    async def handler(e: ft.Event[Any]) -> None:
+        await command(*args, **kwargs)
 
     return handler
