@@ -4,7 +4,7 @@ from typing import Protocol
 
 import flet as ft
 
-from codex_query.domain.value_objects import Source
+from codex_query.domain.models.rag import SourceRef
 from codex_query.presentation.ui.viewmodels.app_viewmodel import AppViewModel
 from codex_query.presentation.ui.viewmodels.events.ui_events import (
     EmbeddingChangeRequest,
@@ -76,6 +76,8 @@ class CodexApp:
 
     def __init__(self, page: ft.Page, vm: AppViewModel) -> None:
         self.page = page
+        self._logger = vm.composition.logger_factory.create(__name__)
+
         self._vm = vm
         self._layout = self._current_layout()
         self._nav_bar: ft.NavigationBar | None = None
@@ -84,7 +86,7 @@ class CodexApp:
 
         # ── Views ─────────────────────────────────────────────────────────────
         self.library = LibraryView(vm.library, vm.composition.logger_factory)
-        self.chat = ChatView()
+        self.chat = ChatView(vm.chat)
         self.indexing = IndexingView(vm.indexing, vm.composition.logger_factory)
         self.settings = SettingsView(vm.settings, vm.composition.logger_factory)
         self._screens: dict[Tab, _Screen] = {
@@ -182,8 +184,6 @@ class CodexApp:
                 ft.VerticalDivider(width=1),
             ]
         row.append(self.body)
-        # TODO: below SOURCES_MIN_WIDTH the sources need another home (inline under
-        # the answer, or a bottom sheet) once ChatView exists.
         if self._layout.with_sources:
             row.append(self.chat.sources.root)
         return ft.Row(row, expand=True, spacing=0)
@@ -204,11 +204,11 @@ class CodexApp:
     def _toast(self, message: str) -> None:
         self.page.show_dialog(ft.SnackBar(content=ft.Text(message)))
 
-    def _show_source(self, source: Source) -> None:
+    def _show_source(self, source: SourceRef) -> None:
         self.page.show_dialog(
             ft.AlertDialog(
                 title=ft.Text(source.label),
-                content=ft.Text(source.text),
+                content=ft.Text(source.excerpt),
                 scrollable=True,
             )
         )
