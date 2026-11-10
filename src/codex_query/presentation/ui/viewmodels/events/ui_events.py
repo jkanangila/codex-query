@@ -3,11 +3,11 @@
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 
-from codex_query.application.observable.signal import Signal
+from codex_query.application.events.signal import Signal
 from codex_query.application.use_cases.settings.check_embedding_compatibility import (
     StaleBook,
 )
-from codex_query.domain.value_objects import Source
+from codex_query.domain.models.rag import SourceRef
 
 
 @dataclass(frozen=True, slots=True)
@@ -36,7 +36,7 @@ class UiEvents:
     def __init__(self) -> None:
         self.toast: Signal[str] = Signal()
         """Show a transient message."""
-        self.source_requested: Signal[Source] = Signal()
+        self.source_requested: Signal[SourceRef] = Signal()
         """Show the full text of a retrieved passage."""
         self.embedding_reindex_requested: Signal[EmbeddingChangeRequest] = Signal()
         """Ask the user to confirm an embedding model or provider change.

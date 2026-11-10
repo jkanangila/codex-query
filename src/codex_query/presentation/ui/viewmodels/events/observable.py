@@ -16,7 +16,7 @@ itself.
 
 from collections.abc import Callable
 
-from codex_query.application.observable.signal import Signal, Unsubscribe
+from codex_query.application.events.signal import Signal, Unsubscribe
 
 
 class ObservableObject:
