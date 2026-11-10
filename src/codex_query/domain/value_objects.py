@@ -6,21 +6,6 @@ from codex_query.domain.models.job import Stage
 
 
 @dataclass(frozen=True, slots=True)
-class Source:
-    """A passage retrieved from a book to ground an answer (a RAG "citation")."""
-
-    chapter: str
-    page: int | None
-    score: float  # similarity score reported by the retriever (higher = closer)
-    text: str
-
-    @property
-    def label(self) -> str:
-        """Short human label, e.g. ``"Ch. 9 · p.118"`` (page omitted if unknown)."""
-        return f"{self.chapter} · p.{self.page}" if self.page else self.chapter
-
-
-@dataclass(frozen=True, slots=True)
 class Progress:
     stage: Stage
     done: int

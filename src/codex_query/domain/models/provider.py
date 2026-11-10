@@ -96,7 +96,7 @@ CHAT_PROVIDER_CONFIGS: Final[Mapping[LLMProvider, ChatProviderConfig]] = {
         path="/chat/completions",
         auth=_BEARER,
         wire_format=WireFormat.OPENAI,
-        default_model="gemini-2.5-flash-lite",
+        default_model="gemini-3.5-flash-lite",
     ),
     LLMProvider.MISTRAL: ChatProviderConfig(
         name="Mistral AI",

@@ -1,3 +1,13 @@
+"""Pipeline for parsing books and persisting their chapters and chunks.
+
+This module provides the `ParsePersistPipeline` class, responsible for reading
+book sources, executing document parsing, managing chunking strategies based on
+configuration changes or file modifications, and persisting records atomically
+via units of work.
+"""
+
+from __future__ import annotations
+
 import asyncio
 from collections.abc import AsyncIterator, Mapping, Sequence
 from dataclasses import replace
@@ -7,7 +17,10 @@ from codex_query.application.ports.indexing import (
     TextChunksPort,
 )
 from codex_query.application.ports.logger import LoggerFactoryPort
-from codex_query.application.ports.unit_of_work import UnitOfWork, UnitOfWorkFactory
+from codex_query.application.ports.unit_of_work import (
+    UnitOfWork,
+    UnitOfWorkFactory,
+)
 from codex_query.application.services.settings_service import SettingsService
 from codex_query.domain.models.document import (
     Book,
@@ -43,6 +56,14 @@ class ParsePersistPipeline:
     Vectors are removed here, in step with the chunks they belong to, so the
     embed stage only has to embed chunks that have no vector yet. Edited and
     removed chapters lose only their own vectors; untouched chapters keep theirs.
+
+    Attributes:
+        _uow_factory (UnitOfWorkFactory): Factory for write units of work.
+        _read_uow_factory (UnitOfWorkFactory): Factory for read units of work.
+        _parser (DocumentParserPort): Document parser port.
+        _chunker (TextChunksPort): Text chunking service port.
+        _settings_service (SettingsService): Live application settings service.
+        _logger (logging.Logger): Logger instance for execution tracking.
     """
 
     def __init__(
@@ -54,6 +75,19 @@ class ParsePersistPipeline:
         settings_service: SettingsService,
         logger_factory: LoggerFactoryPort,
     ) -> None:
+        """Initialize the ParsePersistPipeline.
+
+        Args:
+            uow_factory (UnitOfWorkFactory): Factory to create units of work
+                for write operations.
+            read_uow_factory (UnitOfWorkFactory): Factory to create units of work
+                for read operations.
+            parser (DocumentParserPort): Parser for reading source documents.
+            chunker (TextChunksPort): Service for splitting text into chunks.
+            settings_service (SettingsService): Service providing current settings.
+            logger_factory (LoggerFactoryPort): Factory to create contextual
+                logger instances.
+        """
         self._uow_factory = uow_factory
         self._read_uow_factory = read_uow_factory
         self._parser = parser
@@ -66,6 +100,16 @@ class ParsePersistPipeline:
     async def __call__(
         self, job: IndexingJob, request: QueueIndexJobRequest
     ) -> AsyncIterator[tuple[Progress, IndexingJob]]:
+        """Execute the parsing and persistence pipeline for a queued job.
+
+        Args:
+            job (IndexingJob): The indexing job entity.
+            request (QueueIndexJobRequest): The request details for indexing.
+
+        Yields:
+            tuple[Progress, IndexingJob]: Progress updates and associated job
+            states through parsing, chunking, and embedding preparation stages.
+        """
         settings = self._settings_service.current
 
         self._logger.info(
@@ -118,10 +162,15 @@ class ParsePersistPipeline:
     async def _persist(
         self, uow: UnitOfWork, book: Book, chapters: Sequence[Chapter]
     ) -> tuple[int, int]:
-        """Register or update the book, (re)chunk what is stale, return counts.
+        """Register or update the book, (re)chunk what is stale, and return counts.
+
+        Args:
+            uow (UnitOfWork): Active unit of work transaction.
+            book (Book): The parsed book domain model.
+            chapters (Sequence[Chapter]): Sequence of parsed book chapters.
 
         Returns:
-            ``(book_id, total_chunks_in_book)``
+            tuple[int, int]: A tuple containing ``(book_id, total_chunks_in_book)``.
         """
         existing = await uow.books.get_by_path(book.path)
 
@@ -131,6 +180,8 @@ class ParsePersistPipeline:
 
         if existing is None:
             book_id = await uow.books.register_book(book)
+            chapters = [replace(ch, book_id=book_id) for ch in chapters]
+
             file_changed = True
             self._logger.debug("Registered new book with ID %d", book_id)
         else:
@@ -166,7 +217,8 @@ class ParsePersistPipeline:
                 removed = sorted(known_hashes.keys() - {c.order for c in chapters})
                 if removed:
                     self._logger.info(
-                        "Removing %d chapter(s) no longer in the file", len(removed)
+                        "Removing %d chapter(s) no longer in the file",
+                        len(removed),
                     )
                     if not wipe_vectors:
                         stale_chunk_ids += await uow.chunks.get_ids_for_orders(
@@ -194,7 +246,10 @@ class ParsePersistPipeline:
                     # the old ones when an existing chapter is chunked again.
                     await uow.chunks.delete_for_chapter(chapter_id)
                 chunks = await asyncio.to_thread(
-                    _split_all, self._chunker, replace(chapter, id=chapter_id), book
+                    _split_all,
+                    self._chunker,
+                    replace(chapter, id=chapter_id),
+                    book,
                 )
                 await uow.chunks.upsert_for_chapter(chapter_id, chunks)
 
@@ -230,6 +285,14 @@ def _split_all(
     The ``list()`` has to run here, inside the worker thread; calling
     ``to_thread(chunker.split, ...)`` alone only builds the generator and the
     splitting would then run on the event loop.
+
+    Args:
+        chunker (TextChunksPort): The text chunker port.
+        chapter (Chapter): The chapter model to split.
+        book (Book): The parent book model containing metadata.
+
+    Returns:
+        list[TextChunk]: A list of generated text chunks.
     """
     return list(
         chunker.split(

@@ -49,6 +49,7 @@ class JobRunnerPort(Protocol):
     async def cancel(
         self, job_id: UUID
     ) -> None: ...  # returns once the work has stopped
+    async def cancel_all(self) -> None: ...
     def is_running(self, job_id: UUID) -> bool: ...
 
 

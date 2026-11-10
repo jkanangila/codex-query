@@ -1,3 +1,4 @@
+import hashlib
 from collections.abc import Mapping
 from dataclasses import dataclass, field
 from enum import StrEnum
@@ -98,6 +99,19 @@ class ServiceSettings:
 
         self.provider = new_provider
         return url_changed
+
+    @property
+    def api_key_hash(self) -> str:
+        """Return a short fingerprint of the API key for display."""
+        if not self.api_key:
+            return ""
+
+        return hashlib.sha256(self.api_key.encode()).hexdigest()[:8]
+
+    @property
+    def has_api_key(self) -> bool:
+        """Whether an API key is configured."""
+        return bool(self.api_key)
 
 
 def _default_chat() -> ServiceSettings:

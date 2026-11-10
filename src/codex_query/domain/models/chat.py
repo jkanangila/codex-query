@@ -1,6 +1,6 @@
-from collections.abc import Mapping
 from dataclasses import dataclass
 from enum import StrEnum
+from typing import TypedDict
 
 
 class Role(StrEnum):
@@ -30,20 +30,36 @@ class TokenUsage:
     output_tokens: int
 
 
+class SearchHitMeta(TypedDict):
+    # book info
+    book_id: int
+    book_title: str
+    series: str | None
+    # chapter info
+    chapter_id: int
+    chapter_href: str
+    chapter_title: str
+    chapter_order: int
+    # chunk info
+    chunk_id: int
+    chunk_index: int
+
+
+# RetrievedChunk (VectorStore Search)
 @dataclass(frozen=True, slots=True)
 class SearchHit:
     text: str
     distance: float
-    metadata: Mapping[str, object]
+    metadata: SearchHitMeta
 
 
-@dataclass(frozen=True, slots=True)
-class Answer:
-    question: str
-    answer: str
-    sources: tuple[SearchHit, ...]
-    usage: TokenUsage | None = None
-    finish_reason: str | None = None
+# @dataclass(frozen=True, slots=True)
+# class Answer:
+#     question: str
+#     answer: str
+#     sources: tuple[SearchHit, ...]
+#     usage: TokenUsage | None = None
+#     finish_reason: str | None = None
 
 
 @dataclass(frozen=True, slots=True)
