@@ -51,10 +51,10 @@ class AsyncioJobRunner(JobRunnerPort):
             work: An async callable representing the job workload.
         """
         if job_id in self._tasks:
-            logger.warning("Job ID %d is already running; submission ignored.", job_id)
+            logger.warning("Job ID %s is already running; submission ignored.", job_id)
             return
 
-        logger.info("Submitting job ID %d", job_id)
+        logger.info("Submitting job ID %s", job_id)
         task = asyncio.create_task(self._guarded(work))
         self._tasks[job_id] = task
         task.add_done_callback(lambda _t: self._cleanup_task(job_id))
@@ -67,7 +67,7 @@ class AsyncioJobRunner(JobRunnerPort):
         """
         removed = self._tasks.pop(job_id, None)
         if removed is not None:
-            logger.debug("Cleaned up tracking for job ID %d", job_id)
+            logger.debug("Cleaned up tracking for job ID %s", job_id)
 
     @override
     async def cancel(self, job_id: UUID) -> None:
@@ -77,16 +77,27 @@ class AsyncioJobRunner(JobRunnerPort):
             job_id: Unique identifier for the job to cancel.
         """
         if task := self._tasks.get(job_id):
-            logger.info("Cancelling job ID %d", job_id)
+            logger.info("Cancelling job ID %s", job_id)
             task.cancel()
             with contextlib.suppress(asyncio.CancelledError):
                 await task
-            logger.info("Job ID %d successfully cancelled", job_id)
+            logger.info("Job ID %s successfully cancelled", job_id)
         else:
             logger.debug(
-                "Requested cancellation for non-existent or inactive job ID %d",
+                "Requested cancellation for non-existent or inactive job ID %s",
                 job_id,
             )
+
+    @override
+    async def cancel_all(self) -> None:
+        """Cancel every active job and wait for each to finish its cleanup."""
+        tasks = list(self._tasks.values())
+        if not tasks:
+            return
+        logger.info("Cancelling %d active job(s)", len(tasks))
+        for task in tasks:
+            task.cancel()
+        await asyncio.gather(*tasks, return_exceptions=True)
 
     @override
     def is_running(self, job_id: UUID) -> bool:
@@ -99,7 +110,7 @@ class AsyncioJobRunner(JobRunnerPort):
             True if the job is active, False otherwise.
         """
         running = job_id in self._tasks
-        logger.debug("Checked if job ID %d is running: %s", job_id, running)
+        logger.debug("Checked if job ID %s is running: %s", job_id, running)
         return running
 
     async def _guarded(self, work: Work) -> None:

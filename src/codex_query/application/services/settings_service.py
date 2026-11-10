@@ -6,7 +6,6 @@ from copy import deepcopy
 from codex_query.application.ports.api_keys import ApiKeyRepositoryPort
 from codex_query.application.ports.indexing import SettingsRepositoryPort
 from codex_query.application.ports.logger import LoggerFactoryPort
-from codex_query.domain.errors import ProviderConfigurationError
 from codex_query.domain.models.api_key import ApiKey
 from codex_query.domain.models.provider import LLMProvider
 from codex_query.domain.models.settings import Settings
@@ -45,6 +44,9 @@ class SettingsService:
     def current(self) -> Settings:
         """The committed settings. Treat as read-only; edit a draft instead.
 
+        Returns:
+            Settings: The current active application settings.
+
         Raises:
             RuntimeError: If settings haven't been loaded yet.
         """
@@ -80,7 +82,7 @@ class SettingsService:
                 service.api_key = key
                 if key:
                     self._logger.debug(
-                        "Populated API key for %s provider '%s' from secure storage",
+                        "Populated API key for %s provider '%s' from storage",
                         service_type,
                         service.provider.value,
                     )
@@ -123,14 +125,14 @@ class SettingsService:
                         provider.value,
                     )
 
-            self._settings = committed  # publish only after everything succeeded
+            self._settings = committed  # publish only after success
 
-        self._logger.info("Successfully persisted settings and provider API keys")
+        self._logger.info("Successfully persisted settings and API keys")
 
     async def change_chat_provider(
         self, draft: Settings, provider: LLMProvider
     ) -> bool:
-        """Switch the chat provider and commit the result as the current settings.
+        """Switch the chat provider and commit the result as current settings.
 
         Args:
             draft: Draft settings instance to update (see ``new_draft``).
@@ -145,18 +147,18 @@ class SettingsService:
             provider.value,
         )
         async with self._lock:
-            draft = self.new_draft()
+            active_draft = self.new_draft()
             key = await self._saved_key(provider)
-            url_changed = draft.select_chat_provider(provider)
-            draft.chat.api_key = key
-            self._settings = draft  # swap, don't mutate: adapters see a new object
+            url_changed = active_draft.select_chat_provider(provider)
+            active_draft.chat.api_key = key
+            self._settings = active_draft
         self._log_key_restore(provider, key)
         return url_changed
 
     async def change_embedding_provider(
         self, draft: Settings, provider: LLMProvider
     ) -> bool:
-        """Switch the embedding provider and commit the result as the current settings.
+        """Switch the embedding provider and commit the result as current settings.
 
         Args:
             draft: Draft settings instance to update (see ``new_draft``).
@@ -171,11 +173,11 @@ class SettingsService:
             provider.value,
         )
         async with self._lock:
-            draft = self.new_draft()
+            active_draft = self.new_draft()
             key = await self._saved_key(provider)
-            url_changed = draft.select_embedding_provider(provider)
-            draft.embedding.api_key = key
-            self._settings = draft  # swap, don't mutate: adapters see a new object
+            url_changed = active_draft.select_embedding_provider(provider)
+            active_draft.embedding.api_key = key
+            self._settings = active_draft
         self._log_key_restore(provider, key)
         return url_changed
 
@@ -185,7 +187,7 @@ class SettingsService:
         Returns:
             list[LLMProvider]: Providers currently stored in the key repository.
         """
-        self._logger.debug("Querying secure storage for providers with saved API keys")
+        self._logger.debug("Querying secure storage for saved API keys")
         providers = await self._api_keys.list_providers()
         self._logger.debug("Found %d provider(s) with saved keys", len(providers))
         return providers
@@ -203,6 +205,7 @@ class SettingsService:
         return stored.value if stored is not None else ""
 
     def _log_key_restore(self, provider: LLMProvider, key: str) -> None:
+        """Log whether a saved key was successfully restored for a provider."""
         if key:
             self._logger.debug(
                 "Restored API key for provider '%s'",
@@ -222,8 +225,7 @@ class SettingsService:
             settings: Settings instance to copy.
 
         Returns:
-            Settings: Independent copy with normalized API key values, so what
-                is kept in memory matches what is stored.
+            Settings: Independent copy with normalized API key values.
         """
         copy = deepcopy(settings)
         for service in (copy.chat, copy.embedding):
@@ -232,26 +234,16 @@ class SettingsService:
 
     @staticmethod
     def _collect_keys(settings: Settings) -> dict[LLMProvider, str]:
-        """Extract and validate API keys across all configured services.
+        """Extract API keys across all configured services.
 
         Args:
             settings: Settings instance containing service configurations.
 
         Returns:
             dict[LLMProvider, str]: Map of provider to validated API key value.
-
-        Raises:
-            ProviderConfigurationError: If chat and embedding services share
-                a provider but supply different API key values.
         """
         keys: dict[LLMProvider, str] = {}
         for service in (settings.chat, settings.embedding):
             value = service.api_key.strip()
-            if service.provider in keys and keys[service.provider] != value:
-                msg = (
-                    f"Chat and embeddings both use {service.provider.value} "
-                    "but have different API keys; keys are stored per provider"
-                )
-                raise ProviderConfigurationError(msg)
             keys[service.provider] = value
         return keys
