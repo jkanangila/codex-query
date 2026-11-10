@@ -1,8 +1,10 @@
-"""Application use case for canceling an indexing job and cleaning up its resources."""
+"""Application use case for canceling an indexing job and cleaning up resources."""
+
+from __future__ import annotations
 
 from uuid import UUID
 
-from codex_query.application.observable.job_events import JobEvents
+from codex_query.application.events.job_events import JobEvents
 from codex_query.application.ports.indexing import JobRunnerPort
 from codex_query.application.ports.logger import LoggerFactoryPort
 from codex_query.application.ports.unit_of_work import UnitOfWorkFactory
@@ -12,10 +14,16 @@ from codex_query.domain.models.job import JobStatus
 class CancelIndexing:
     """Use case responsible for canceling an indexing job.
 
-    Stops the runner task, marks the job cancelled, and removes what the job
-    created. A book that was already indexed by an earlier, completed job is kept
+    Stops the runner task, marks the job cancelled or failed, and removes what the
+    job created. A book that was already indexed by an earlier, completed job is kept
     (cancelling an *update* must not delete the whole book); a book that only
     exists because of this job is deleted together with its vectors.
+
+    Attributes:
+        _uow_factory (UnitOfWorkFactory): Factory to create units of work.
+        _runner (JobRunnerPort): Port for halting background job runs.
+        _events (JobEvents): Event emitter for propagating job state updates.
+        _logger (logging.Logger): Logger instance for tracking execution.
     """
 
     def __init__(
@@ -28,21 +36,34 @@ class CancelIndexing:
         """Initialize the CancelIndexing use case.
 
         Args:
-            uow_factory: Factory to create units of work for data access.
-            runner: Port responsible for executing or halting background job runs.
-            events: Event emitter for propagating job state updates to the UI.
-            logger_factory: Factory used to create a contextual logger.
+            uow_factory (UnitOfWorkFactory): Factory to create units of work for
+                data access.
+            runner (JobRunnerPort): Port responsible for executing or halting
+                background job runs.
+            events (JobEvents): Event emitter for propagating job state updates
+                to the UI.
+            logger_factory (LoggerFactoryPort): Factory used to create a
+                contextual logger.
         """
         self._uow_factory = uow_factory
         self._runner = runner
         self._events = events
         self._logger = logger_factory.create(__name__)
 
-    async def __call__(self, job_id: UUID) -> None:
+    async def __call__(
+        self,
+        job_id: UUID,
+        job_failed: bool = False,
+        reason_for_failure: str = "",
+    ) -> None:
         """Execute the cancellation process for a given indexing job.
 
         Args:
-            job_id: The unique identifier of the job to cancel.
+            job_id (UUID): The unique identifier of the job to cancel.
+            job_failed (bool): Flag indicating whether the job failed rather
+                than being explicitly canceled. Defaults to False.
+            reason_for_failure (str): Optional description of why the job failed.
+                Defaults to "".
         """
         self._logger.info("Attempting to cancel indexing job %s", job_id)
 
@@ -61,7 +82,16 @@ class CancelIndexing:
             self._logger.info("Job %s already %s", job_id, job.status.value)
             return
 
-        job.cancel()
+        if job_failed:
+            self._logger.warning(
+                "Marking job %s as failed. Reason: %s",
+                job_id,
+                reason_for_failure or "No reason provided",
+            )
+            job.fail(reason_for_failure)
+        else:
+            self._logger.info("Marking job %s as canceled", job_id)
+            job.cancel()
 
         async with self._uow_factory() as uow:
             others = await uow.jobs.list_for_book(job.book_id)
