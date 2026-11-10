@@ -5,13 +5,15 @@ job records, requesting cancellation from the job runner, updating job statuses
 to paused when appropriate, persisting state changes, and emitting UI events.
 """
 
+from __future__ import annotations
+
 from uuid import UUID
 
+from codex_query.application.events.job_events import JobEvents
 from codex_query.application.ports.indexing import JobRunnerPort
 from codex_query.application.ports.logger import LoggerFactoryPort
 from codex_query.application.ports.unit_of_work import UnitOfWorkFactory
 from codex_query.domain.models.job import JobStatus
-from codex_query.application.observable.job_events import JobEvents
 
 
 class PauseIndexing:
@@ -19,6 +21,12 @@ class PauseIndexing:
 
     Cancels active execution via the job runner, handles persistence of the paused
     state for queued jobs, and notifies the UI layer via job update events.
+
+    Attributes:
+        _uow_factory (UnitOfWorkFactory): Factory to create units of work.
+        _runner (JobRunnerPort): Runner port to manage background job cancellation.
+        _events (JobEvents): Event emitter for UI job updates.
+        _logger (logging.Logger): Logger instance for tracking execution.
     """
 
     def __init__(
@@ -31,10 +39,13 @@ class PauseIndexing:
         """Initialize the PauseIndexing use case.
 
         Args:
-            uow_factory: Factory to create unit of work instances for persistence.
-            runner: Job runner port to manage background job cancellation.
-            events: Event emitter for UI job updates.
-            logger_factory: Factory to create contextual logger instances.
+            uow_factory (UnitOfWorkFactory): Factory to create unit of work
+                instances for persistence.
+            runner (JobRunnerPort): Job runner port to manage background job
+                cancellation.
+            events (JobEvents): Event emitter for UI job updates.
+            logger_factory (LoggerFactoryPort): Factory to create contextual
+                logger instances.
         """
         self._uow_factory = uow_factory
         self._runner = runner
@@ -48,7 +59,7 @@ class PauseIndexing:
         its status if it was still queued.
 
         Args:
-            job_id: Unique identifier of the job to pause.
+            job_id (UUID): Unique identifier of the job to pause.
         """
         self._logger.info("Attempting to pause indexing job %s", job_id)
 
@@ -73,5 +84,7 @@ class PauseIndexing:
             self._events.on_job_update.emit(job)
         else:
             self._logger.info(
-                "Job %s cancellation requested (status: %s)", job_id, job.status
+                "Job %s cancellation requested (status: %s)",
+                job_id,
+                job.status,
             )

@@ -1,5 +1,9 @@
 """Application use case for recovering interrupted indexing jobs and fetching their
-book titles on startup."""
+
+book titles on startup.
+"""
+
+from __future__ import annotations
 
 from codex_query.application.ports.logger import LoggerFactoryPort
 from codex_query.application.ports.unit_of_work import UnitOfWorkFactory
@@ -12,6 +16,11 @@ class RecoverInterruptedJobs:
     Typically invoked during application startup to clean up jobs left in active
     states (e.g., due to an unexpected crash or system shutdown) and retrieve
     their corresponding book titles.
+
+    Attributes:
+        _uow_factory (UnitOfWorkFactory): Factory to create units of work
+            for data access.
+        _logger (logging.Logger): Logger instance for tracking execution.
     """
 
     def __init__(
@@ -22,8 +31,10 @@ class RecoverInterruptedJobs:
         """Initialize the RecoverInterruptedJobs use case.
 
         Args:
-            uow_factory: Factory to create units of work for data access.
-            logger_factory: Factory used to create a contextual logger.
+            uow_factory (UnitOfWorkFactory): Factory to create units of work for
+                data access.
+            logger_factory (LoggerFactoryPort): Factory used to create a contextual
+                logger.
         """
         self._uow_factory = uow_factory
         self._logger = logger_factory.create(__name__)
@@ -37,8 +48,8 @@ class RecoverInterruptedJobs:
         their book titles.
 
         Returns:
-            A list of tuples containing the IndexingJob and its associated book
-            title (or None).
+            list[tuple[IndexingJob, str | None]]: A list of tuples containing
+            the IndexingJob and its associated book title (or None).
         """
         self._logger.info("Starting recovery of interrupted indexing jobs...")
 
@@ -46,7 +57,8 @@ class RecoverInterruptedJobs:
             jobs = await uow.jobs.list_active()
             self._logger.debug("Found %d active jobs during recovery check", len(jobs))
 
-            recovered = []
+            recovered: list[tuple[IndexingJob, str | None]] = []
+            paused = 0
             for job in jobs:
                 if job.status in (JobStatus.RUNNING, JobStatus.QUEUED):
                     self._logger.info(
@@ -56,19 +68,16 @@ class RecoverInterruptedJobs:
                     )
                     job.pause()
                     await uow.jobs.save(job)
-                    book = await uow.books.get_by_id(job.book_id)
+                    paused += 1
 
-                    book_title = book.title if book else None
-                    self._logger.debug(
-                        "Retrieved book title '%s' for job %s",
-                        book_title,
-                        job.id,
-                    )
-                    recovered.append((job, book_title))
+                if job.status is JobStatus.PAUSED:
+                    book = await uow.books.get_by_id(job.book_id)
+                    recovered.append((job, book.title if book else None))
 
             await uow.commit()
             self._logger.info(
-                "Job recovery completed successfully. Paused %d active job(s).",
+                "Job recovery completed. Paused %d interrupted job(s), restoring %d.",
+                paused,
                 len(recovered),
             )
             return recovered
