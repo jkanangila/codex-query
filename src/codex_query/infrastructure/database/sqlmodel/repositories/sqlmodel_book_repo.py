@@ -16,7 +16,7 @@ from codex_query.domain.models.document import (
 )
 from codex_query.domain.models.document import Book as DomainBook
 from codex_query.infrastructure.logging.factory import create_logger
-from codex_query.infrastructure.persistence.sqlmodel.models import Book
+from codex_query.infrastructure.database.sqlmodel.models import Book
 
 logger = create_logger(__name__)
 

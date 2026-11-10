@@ -15,7 +15,7 @@ from codex_query.domain.models.job import (
     Stage,
 )
 from codex_query.infrastructure.logging.factory import create_logger
-from codex_query.infrastructure.persistence.sqlmodel.models import (
+from codex_query.infrastructure.database.sqlmodel.models import (
     IndexingJob as IndexingJobRecord,
 )
 

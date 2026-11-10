@@ -5,22 +5,22 @@ from sqlalchemy.ext.asyncio import async_sessionmaker
 from sqlmodel.ext.asyncio.session import AsyncSession
 
 from codex_query.application.ports.unit_of_work import UnitOfWork
-from codex_query.infrastructure.persistence.sqlmodel.repositories.sqlmodel_book_repo import (  # noqa: E501
+from codex_query.infrastructure.database.sqlmodel.repositories.sqlmodel_book_repo import (  # noqa: E501
     SqlModelBookRepository,
 )
-from codex_query.infrastructure.persistence.sqlmodel.repositories.sqlmodel_chapter_repo import (  # noqa: E501
+from codex_query.infrastructure.database.sqlmodel.repositories.sqlmodel_chapter_repo import (  # noqa: E501
     SqlModelChapterRepository,
 )
-from codex_query.infrastructure.persistence.sqlmodel.repositories.sqlmodel_chunk_repo import (  # noqa: E501
+from codex_query.infrastructure.database.sqlmodel.repositories.sqlmodel_chunk_repo import (  # noqa: E501
     SqlModelChunkRepository,
 )
-from codex_query.infrastructure.persistence.sqlmodel.repositories.sqlmodel_job_repo import (  # noqa: E501
+from codex_query.infrastructure.database.sqlmodel.repositories.sqlmodel_job_repo import (  # noqa: E501
     SqlModelIndexingJobRepository,
 )
-from codex_query.infrastructure.persistence.sqlmodel.repositories.sqlmodel_vector_store import (  # noqa: E501
+from codex_query.infrastructure.database.sqlmodel.repositories.sqlmodel_vector_store import (  # noqa: E501
     SqlModelVectorStore,
 )
-from codex_query.infrastructure.persistence.vector_store_factory import (
+from codex_query.infrastructure.database.vector_store_factory import (
     VectorStoreFactory,
 )
 

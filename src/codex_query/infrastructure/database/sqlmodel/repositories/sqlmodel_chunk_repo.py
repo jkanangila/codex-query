@@ -4,14 +4,14 @@ from typing import Any, override
 
 from sqlalchemy import delete
 from sqlalchemy.dialects.sqlite import insert
-from sqlmodel import col, select
+from sqlmodel import col, func, select
 from sqlmodel.ext.asyncio.session import AsyncSession
 
 from codex_query.application.ports.library import IChunkRepository
 from codex_query.domain.models.document import TextChunk as DomainTextChunk
 from codex_query.domain.models.document import TextChunkMetadata
+from codex_query.infrastructure.database.sqlmodel.models import Chapter, TextChunk
 from codex_query.infrastructure.logging.factory import create_logger
-from codex_query.infrastructure.persistence.sqlmodel.models import Chapter, TextChunk
 
 _META_FIELDS = {f.name for f in fields(TextChunkMetadata)}
 
@@ -209,6 +209,16 @@ class SqlModelChunkRepository(IChunkRepository):
             )
             ids.extend(chunk_id for chunk_id in result.all() if chunk_id is not None)
         return ids
+
+    @override
+    async def count_for_book(self, book_id: int) -> int:
+        statement = (
+            select(func.count(col(TextChunk.id)))
+            .join(Chapter, col(TextChunk.chapter_id) == Chapter.id)
+            .where(Chapter.book_id == book_id)
+        )
+        result = await self._session.exec(statement)
+        return result.one()
 
 
 def _to_row(chapter_id: int, chunk: DomainTextChunk) -> dict[str, Any]:

@@ -2,10 +2,10 @@ from alembic import context
 from sqlalchemy import create_engine
 from sqlmodel import SQLModel
 
-from codex_query.infrastructure.persistence.sqlmodel import (
+from codex_query.infrastructure.database.sqlmodel import (
     models,  # noqa: F401  # pyright: ignore[reportUnusedImport]
 )
-from codex_query.infrastructure.persistence.sqlmodel.config import db_config
+from codex_query.infrastructure.database.sqlmodel.config import db_config
 
 target_metadata = SQLModel.metadata
 

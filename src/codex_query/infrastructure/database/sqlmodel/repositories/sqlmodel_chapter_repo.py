@@ -11,7 +11,7 @@ from codex_query.application.ports.library import IChapterRepository
 from codex_query.domain.errors import ChapterAlreadyExistsError
 from codex_query.domain.models.document import Chapter as DomainChapter
 from codex_query.infrastructure.logging.factory import create_logger
-from codex_query.infrastructure.persistence.sqlmodel.models import Chapter
+from codex_query.infrastructure.database.sqlmodel.models import Chapter
 
 # SQLite < 3.32 allows only 999 bound variables per statement.
 _COLUMNS_PER_ROW = 6

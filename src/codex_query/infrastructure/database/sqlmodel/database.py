@@ -9,10 +9,10 @@ from sqlalchemy.pool import ConnectionPoolEntry
 from sqlmodel.ext.asyncio.session import AsyncSession
 
 from codex_query.infrastructure.logging.factory import create_logger
-from codex_query.infrastructure.persistence.sqlmodel.config import (
+from codex_query.infrastructure.database.sqlmodel.config import (
     DatabaseConfig,
 )
-from codex_query.infrastructure.persistence.sqlmodel.migrate import (
+from codex_query.infrastructure.database.sqlmodel.migrate import (
     run_migrations,
 )
 

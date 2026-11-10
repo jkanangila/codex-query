@@ -8,7 +8,7 @@ from sqlmodel.ext.asyncio.session import AsyncSession
 
 from codex_query.application.ports.vector_store import VectorStorePort
 from codex_query.infrastructure.paths import AppPaths
-from codex_query.infrastructure.persistence.sqlmodel.repositories import (
+from codex_query.infrastructure.database.sqlmodel.repositories import (
     sqlmodel_vector_store,
 )
 
@@ -69,7 +69,7 @@ def build_vector_store_factory(
 
     import chromadb
 
-    from codex_query.infrastructure.persistence.chromadb_vector_store import (
+    from codex_query.infrastructure.database.chromadb_vector_store import (
         ChromaVectorStore,
     )
 

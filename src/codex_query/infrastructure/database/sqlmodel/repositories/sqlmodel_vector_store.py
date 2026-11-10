@@ -17,8 +17,8 @@ from codex_query.domain.errors import EmbeddingMismatchError
 from codex_query.domain.models.chat import SearchHit
 from codex_query.domain.models.document import TextChunk as DomainTextChunk
 from codex_query.infrastructure.logging.factory import create_logger
-from codex_query.infrastructure.persistence.sqlmodel.models import ChunkEmbedding
-from codex_query.infrastructure.persistence.sqlmodel.repositories.sqlmodel_hits import (
+from codex_query.infrastructure.database.sqlmodel.models import ChunkEmbedding
+from codex_query.infrastructure.database.sqlmodel.repositories.sqlmodel_hits import (
     load_hits,
 )
 
