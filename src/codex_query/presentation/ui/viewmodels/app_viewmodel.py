@@ -30,19 +30,21 @@ class AppViewModel(ObservableObject):
     """Central application view model coordinating sub-views and navigation.
 
     Attributes:
-        composition (CompositionRoot): The application composition root.
-        events (UiEvents): Global UI event emitter.
-        library (LibraryViewModel): View model for managing books and library state.
-        chat (ChatViewModel): View model for interacting with the chat interface.
-        indexing (IndexingViewModel): View model for managing indexing jobs.
-        settings (SettingsViewModel): View model for managing application settings.
+        composition: The application composition root.
+        events: Global UI event emitter.
+        library: View model for managing books and library state.
+        chat: View model for interacting with the chat interface.
+        indexing: View model for managing indexing jobs.
+        settings: View model for managing application settings.
+        _logger: Contextual component logger instance.
+        _tab: Currently active navigation tab.
     """
 
     def __init__(self, composition: CompositionRoot) -> None:
         """Initialize the AppViewModel with dependencies and sub-view models.
 
         Args:
-            composition (CompositionRoot): The dependency injection root.
+            composition: The dependency injection root.
         """
         super().__init__()
         self._logger = composition.logger_factory.create(__name__)
@@ -53,8 +55,8 @@ class AppViewModel(ObservableObject):
         self._logger.info("Initializing AppViewModel sub-view models...")
         self.library = LibraryViewModel(
             composition.use_cases,
+            events=self.events,
             on_select=self.select_book,
-            on_add_book=self.go_to_index,
             logger_factory=composition.logger_factory,
         )
         self.chat = ChatViewModel(
@@ -74,6 +76,7 @@ class AppViewModel(ObservableObject):
         )
 
         self.indexing.job_completed.subscribe(self._on_job_completed)
+        self.events.tab_navigation_requested.subscribe(self.navigate_to_tab)
         self._logger.debug("AppViewModel initialization completed successfully.")
 
     @classmethod
@@ -84,10 +87,10 @@ class AppViewModel(ObservableObject):
         persistence.
 
         Args:
-            composition (CompositionRoot): The dependency injection root.
+            composition: The dependency injection root.
 
         Returns:
-            AppViewModel: An initialized instance of AppViewModel.
+            An initialized instance of AppViewModel.
         """
         vm = cls(composition)
         vm._logger.info("Restoring indexing jobs and loading books from database...")
@@ -105,7 +108,11 @@ class AppViewModel(ObservableObject):
 
     @property
     def tab(self) -> Tab:
-        """Tab: Get the currently active navigation tab."""
+        """Get the currently active navigation tab.
+
+        Returns:
+            The active `Tab` enum value.
+        """
         return self._tab
 
     # ── Navigation ────────────────────────────────────────────────────────
@@ -113,30 +120,36 @@ class AppViewModel(ObservableObject):
         """Navigate to a specified application tab and notify listeners.
 
         Args:
-            tab (Tab): The target tab to switch to.
+            tab: The target tab to switch to.
         """
         self._logger.debug(f"Navigating from tab {self._tab} to tab {tab}")
         self._tab = tab
         self.notify_changed()
 
-    def go_to_index(self) -> None:
-        """Switch the current view to the Indexing tab."""
-        self.navigate(Tab.INDEXING)
+    def navigate_to_tab(self, tab: Tab) -> None:
+        """Switch the current view to the specified tab.
+
+        Args:
+            tab: The target tab to switch to.
+        """
+        self.navigate(tab)
 
     # ── coordination ──────────────────────────────────────────────────────
-    def select_book(self, id: int) -> None:
+    def select_book(self, book_id: int) -> None:
         """Make the specified book ID the question scope.
 
         Highlights the book, resets the chat scope, and prepares for querying.
 
         Args:
-            id (int): The unique identifier of the selected book.
+            book_id: The unique identifier of the selected book.
         """
-        self._logger.debug(f"Selecting book with ID: {id}")
-        self.library.set_selection(id)
-        selected = next((b for b in self.library.books if b.id == id), None)
+        self._logger.debug(f"Selecting book with ID: {book_id}")
+        self.library.set_selection(book_id)
+        selected = next((b for b in self.library.books if b.id == book_id), None)
         if selected is None:
-            self._logger.warning(f"Failed to find book with ID {id} during selection.")
+            self._logger.warning(
+                f"Failed to find book with ID {book_id} during selection."
+            )
             self.events.toast.emit(
                 "Error! Cannot find data corresponding to the requested book. "
                 "Delete then re-index the book"
@@ -150,7 +163,7 @@ class AppViewModel(ObservableObject):
         """Handle completion of an indexing job by refreshing books and notifying user.
 
         Args:
-            job (IndexingJob): The completed indexing job.
+            job: The completed indexing job.
         """
         self._logger.info(f"Indexing job completed for job ID: {job.id}")
         books = await self.composition.use_cases.library.list_books()
