@@ -36,6 +36,13 @@ class JobCardViewModel(ObservableObject):
 
     Manages job states, display formatting, asynchronous commands (toggle, cancel),
     and observer notifications.
+
+    Attributes:
+        _job: The indexing job domain model.
+        _book_title: The title of the book being indexed.
+        _use_cases: The application use cases facade.
+        _on_discard: Callback triggered when the job is discarded/cancelled.
+        _logger: Contextual component logger instance.
     """
 
     def __init__(
@@ -46,7 +53,7 @@ class JobCardViewModel(ObservableObject):
         on_discard: Callable[["JobCardViewModel"], None],
         logger_factory: LoggerFactoryPort,
     ) -> None:
-        """Initialize the job card view model.
+        """Initializes the JobCardViewModel.
 
         Args:
             job: The indexing job domain model.
@@ -70,32 +77,56 @@ class JobCardViewModel(ObservableObject):
     # ── display state ─────────────────────────────────────────────────────
     @property
     def job_id(self) -> UUID:
-        """Return the unique identifier of the job."""
+        """Return the unique identifier of the job.
+
+        Returns:
+            The job's unique `UUID`.
+        """
         return self._job.id
 
     @property
     def title(self) -> str:
-        """Return the title of the book associated with the job."""
+        """Return the title of the book associated with the job.
+
+        Returns:
+            The book title string.
+        """
         return self._book_title
 
     @property
     def is_running(self) -> bool:
-        """Check if the indexing job is currently running."""
+        """Check if the indexing job is currently running.
+
+        Returns:
+            True if running, False otherwise.
+        """
         return self._job.status == JobStatus.RUNNING
 
     @property
     def status_text(self) -> str:
-        """Return the human-readable status text for the job."""
+        """Return the human-readable status text for the job.
+
+        Returns:
+            The formatted status description string.
+        """
         return job_status_text(self._job)
 
     @property
     def counter_text(self) -> str:
-        """Return the formatted progress counter text for the job."""
+        """Return the formatted progress counter text for the job.
+
+        Returns:
+            The formatted progress counter string.
+        """
         return job_counter_text(self._job)
 
     @property
     def progress(self) -> float | None:
-        """Return the progress fraction or None if indeterminable."""
+        """Return the progress fraction or None if indeterminable.
+
+        Returns:
+            The progress fraction as a float, or None if indeterminable.
+        """
         job = self._job
         if job.total:
             return job.fraction
@@ -103,7 +134,11 @@ class JobCardViewModel(ObservableObject):
 
     @property
     def stages(self) -> list[StageIndicator]:
-        """Return a list of stage indicators representing the pipeline progress."""
+        """Return a list of stage indicators representing the pipeline progress.
+
+        Returns:
+            A list of `StageIndicator` configurations for each pipeline stage.
+        """
         current = list(Stage).index(self._job.stage)
         return [
             StageIndicator(
@@ -116,7 +151,11 @@ class JobCardViewModel(ObservableObject):
 
     @property
     def toggle_label(self) -> str:
-        """Return the action label for the toggle button."""
+        """Return the action label for the toggle button.
+
+        Returns:
+            The string label ('Pause' or 'Resume').
+        """
         return "Pause" if self.is_running else "Resume"
 
     # ── commands ──────────────────────────────────────────────────────────

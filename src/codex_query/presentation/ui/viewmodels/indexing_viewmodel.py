@@ -5,9 +5,9 @@ from collections.abc import Sequence
 from pathlib import Path
 from uuid import UUID, uuid4
 
+from codex_query.application.events.async_signal import AsyncSignal
+from codex_query.application.events.job_events import JobEvents
 from codex_query.application.facade import UseCases
-from codex_query.application.observable.job_events import JobEvents
-from codex_query.application.observable.signal import Signal
 from codex_query.application.ports.logger import LoggerFactoryPort
 from codex_query.domain.models.document import DocumentType
 from codex_query.domain.models.job import IndexingJob
@@ -37,6 +37,27 @@ class IndexingViewModel(ObservableObject):
 
     Manages book metadata fields, file selection state, background job restoration,
     and event subscriptions for job progress updates and completion.
+
+    Attributes:
+        _use_cases: Application use cases facade.
+        _job_events: Event emitter for job-related actions and state changes.
+        _ui_events: Event emitter for general UI notifications and toasts.
+        _logger_factory: Factory used to create contextual sub-component loggers.
+        _logger: Contextual component logger instance.
+        _cards: List of active job card view models.
+        _path: Filesystem path of the selected file to index, if any.
+        _file_name: Display name of the selected file.
+        title: Book title form field value.
+        series: Series name form field value.
+        number_text: Book number within series form field value.
+        language: Document language form field value.
+        publisher: Document publisher form field value.
+        description: Document description form field value.
+        isbn: ISBN form field value.
+        published_year_str: Published year form field value.
+        subjects_text: Comma or semicolon-separated subjects form field value.
+        document_type: Selected document type enumeration.
+        job_completed: Signal emitted when an indexing job finishes successfully.
     """
 
     def __init__(
@@ -46,7 +67,7 @@ class IndexingViewModel(ObservableObject):
         ui_events: UiEvents,
         logger_factory: LoggerFactoryPort,
     ) -> None:
-        """Initialize the IndexingViewModel.
+        """Initializes the IndexingViewModel.
 
         Args:
             use_cases: The application use cases facade.
@@ -80,7 +101,7 @@ class IndexingViewModel(ObservableObject):
         self.document_type: DocumentType = DocumentType.UNKNOWN
 
         # ── subscriptions and events ──────────────────────────────────────────
-        self.job_completed: Signal[IndexingJob] = Signal()
+        self.job_completed: AsyncSignal[IndexingJob] = AsyncSignal()
         job_events.on_job_update.subscribe(self._on_job_updated)
         job_events.on_job_done.subscribe(self._on_job_done)
 
@@ -89,17 +110,29 @@ class IndexingViewModel(ObservableObject):
     # ── state ─────────────────────────────────────────────────────────────
     @property
     def jobs(self) -> list[JobCardViewModel]:
-        """Return a copy of the list of current job card view models."""
+        """Return a copy of the list of current job card view models.
+
+        Returns:
+            A new list containing active `JobCardViewModel` instances.
+        """
         return list(self._cards)
 
     @property
     def file_label(self) -> str:
-        """Return the display name of the selected file or default fallback text."""
+        """Return the display name of the selected file or default fallback text.
+
+        Returns:
+            The file name string or fallback placeholder.
+        """
         return self._file_name or NO_FILE_TEXT
 
     @property
     def document_type_options(self) -> list[tuple[str, str]]:
-        """``(key, label)`` pairs for the document type selector."""
+        """``(key, label)`` pairs for the document type selector.
+
+        Returns:
+            A list of tuples containing document type keys and labels.
+        """
         return DOCUMENT_TYPE_OPTIONS
 
     # ── commands ──────────────────────────────────────────────────────────
@@ -129,7 +162,12 @@ class IndexingViewModel(ObservableObject):
         self.notify_changed()
 
     def set_document_type(self, key: str) -> None:
-        """Select the document type from one of :attr:`document_type_options`."""
+        """Select the document type from one of :attr:`document_type_options`.
+
+        Args:
+            key: The document type string key.
+        """
+        self._logger.debug("Setting document type to option key: '%s'", key)
         self.document_type = DocumentType(key)
 
     def start(self) -> None:
@@ -160,8 +198,9 @@ class IndexingViewModel(ObservableObject):
         """Re-index books that are already in the library and show their jobs.
 
         Args:
-            book_ids: Database ids of the books to re-index.
+            book_ids: Database IDs of the books to re-index.
         """
+        self._logger.info("Starting re-index for %d book(s)", len(book_ids))
         queued = await self._use_cases.indexing.reindex_document(book_ids)
         for job, title in queued:
             self.track(job, title)
@@ -171,7 +210,12 @@ class IndexingViewModel(ObservableObject):
             )
 
     def track(self, job: IndexingJob, title: str) -> None:
-        """Show a card for ``job``, unless it already has one."""
+        """Show a card for ``job``, unless it already has one.
+
+        Args:
+            job: The indexing job domain model to track.
+            title: The title of the book being indexed.
+        """
         if self._card_for(job.id) is not None:
             return
         self._add_card(job, title)
@@ -180,8 +224,14 @@ class IndexingViewModel(ObservableObject):
     def _build_request(self, path: Path) -> QueueIndexJobRequest:
         """Turn the form into a request, rejecting values that make no sense.
 
+        Args:
+            path: Filesystem path to the document source.
+
+        Returns:
+            A validated `QueueIndexJobRequest` instance.
+
         Raises:
-            ValueError: With a message fit to show the user.
+            ValueError: With a message fit to show the user if form validation fails.
         """
         digits = self.number_text.strip()
         if digits and not digits.isdigit():
@@ -235,7 +285,12 @@ class IndexingViewModel(ObservableObject):
         self.notify_changed()
 
     def _add_card(self, job: IndexingJob, title: str) -> None:
-        """Create and add a new JobCardViewModel to the active list."""
+        """Create and add a new JobCardViewModel to the active list.
+
+        Args:
+            job: The indexing job domain model.
+            title: The title of the book associated with the job.
+        """
         self._logger.debug("Adding job card view model for job %s", job.id)
         self._cards.append(
             JobCardViewModel(
@@ -249,25 +304,44 @@ class IndexingViewModel(ObservableObject):
         self.notify_changed()
 
     def _remove_card(self, card: JobCardViewModel) -> None:
-        """Remove a specified JobCardViewModel from the active list."""
+        """Remove a specified JobCardViewModel from the active list.
+
+        Args:
+            card: The `JobCardViewModel` instance to remove.
+        """
         if card in self._cards:
             self._logger.debug("Removing job card view model for job %s", card.job_id)
             self._cards.remove(card)
             self.notify_changed()
 
     def _card_for(self, job_id: UUID) -> JobCardViewModel | None:
-        """Find and return the JobCardViewModel matching the given job ID."""
+        """Find and return the JobCardViewModel matching the given job ID.
+
+        Args:
+            job_id: The unique `UUID` of the indexing job.
+
+        Returns:
+            The matching `JobCardViewModel`, or None if not found.
+        """
         return next((c for c in self._cards if c.job_id == job_id), None)
 
     def _on_job_updated(self, job: IndexingJob) -> None:
-        """Handle job update events by refreshing the corresponding card view model."""
+        """Handle job update events by refreshing the corresponding card view model.
+
+        Args:
+            job: The updated `IndexingJob` domain model instance.
+        """
         self._logger.debug("Received job update event for job %s", job.id)
         if card := self._card_for(job.id):
             card.refresh(job)
 
-    def _on_job_done(self, job: IndexingJob) -> None:
-        """Handle job completion events by removing the card and emitting signals."""
+    async def _on_job_done(self, job: IndexingJob) -> None:
+        """Handle job completion events by removing the card and emitting signals.
+
+        Args:
+            job: The completed `IndexingJob` domain model instance.
+        """
         self._logger.info("Job %s marked as done; removing card", job.id)
         if card := self._card_for(job.id):
             self._remove_card(card)
-        self.job_completed.emit(job)
+        await self.job_completed.emit(job)

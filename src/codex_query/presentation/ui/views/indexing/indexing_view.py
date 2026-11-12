@@ -29,6 +29,26 @@ class IndexingView:
 
     Observes an `IndexingViewModel` to sync input forms, handle file picking,
     initiate indexing jobs, and synchronize dynamic job progress cards.
+
+    Attributes:
+        _vm: The `IndexingViewModel` tracking form inputs and background jobs.
+        _logger_factory: Factory to produce contextual sub-component loggers.
+        _logger: Contextual component logger instance.
+        _cards: Mapping of `JobCardViewModel` instances to their `JobCardView`
+            UI components.
+        file_label: Flet text control displaying the chosen file name.
+        name: Flet text field control for the book title.
+        series: Flet text field control for the book series.
+        number: Flet text field control for the book number within the series.
+        language: Flet text field control for the document language.
+        published_year: Flet text field control for the publication year.
+        publisher: Flet text field control for the publisher name.
+        isbn: Flet text field control for the document ISBN.
+        subjects: Flet text field control for document subjects/tags.
+        document_type: Flet dropdown control for the document type.
+        description: Flet text field control for the book description.
+        jobs_col: Flet column control containing active job cards.
+        root: Root container Flet control encapsulating the indexing screen.
     """
 
     def __init__(
@@ -179,49 +199,93 @@ class IndexingView:
 
     # ── View -> ViewModel ─────────────────────────────────────────────────
     def _on_name(self, _e: ft.Event[ft.TextField]) -> None:
-        """Handle changes to the book name text field."""
+        """Handle changes to the book name text field.
+
+        Args:
+            _e: The Flet text field change event payload.
+        """
         self._vm.title = self.name.value or ""
 
     def _on_series(self, _e: ft.Event[ft.TextField]) -> None:
-        """Handle changes to the series text field."""
+        """Handle changes to the series text field.
+
+        Args:
+            _e: The Flet text field change event payload.
+        """
         self._vm.series = self.series.value or ""
 
     def _on_number(self, _e: ft.Event[ft.TextField]) -> None:
-        """Handle changes to the book number text field."""
+        """Handle changes to the book number text field.
+
+        Args:
+            _e: The Flet text field change event payload.
+        """
         self._vm.number_text = self.number.value or ""
 
     def _on_language(self, _e: ft.Event[ft.TextField]) -> None:
-        """Handle changes to the language text field."""
+        """Handle changes to the language text field.
+
+        Args:
+            _e: The Flet text field change event payload.
+        """
         self._vm.language = self.language.value or ""
 
     def _on_published_year(self, _e: ft.Event[ft.TextField]) -> None:
-        """Handle changes to the published year text field."""
+        """Handle changes to the published year text field.
+
+        Args:
+            _e: The Flet text field change event payload.
+        """
         self._vm.published_year_str = self.published_year.value or ""
 
     def _on_publisher(self, _e: ft.Event[ft.TextField]) -> None:
-        """Handle changes to the publisher text field."""
+        """Handle changes to the publisher text field.
+
+        Args:
+            _e: The Flet text field change event payload.
+        """
         self._vm.publisher = self.publisher.value or ""
 
     def _on_isbn(self, _e: ft.Event[ft.TextField]) -> None:
-        """Handle changes to the ISBN text field."""
+        """Handle changes to the ISBN text field.
+
+        Args:
+            _e: The Flet text field change event payload.
+        """
         self._vm.isbn = self.isbn.value or ""
 
     def _on_subjects(self, _e: ft.Event[ft.TextField]) -> None:
-        """Handle changes to the subjects text field."""
+        """Handle changes to the subjects text field.
+
+        Args:
+            _e: The Flet text field change event payload.
+        """
         self._vm.subjects_text = self.subjects.value or ""
 
     def _on_description(self, _e: ft.Event[ft.TextField]) -> None:
-        """Handle changes to the description text field."""
+        """Handle changes to the description text field.
+
+        Args:
+            _e: The Flet text field change event payload.
+        """
         self._vm.description = self.description.value or ""
 
     def _on_document_type(self, _e: ft.Event[ft.Dropdown]) -> None:
-        """Handle a new selection in the document type dropdown."""
+        """Handle a new selection in the document type dropdown.
+
+        Args:
+            _e: The Flet dropdown change event payload.
+        """
         self._vm.set_document_type(
             self.document_type.value or DocumentType.UNKNOWN.value
         )
 
     async def _on_pick(self, _e: ft.Event[ft.OutlinedButton]) -> None:
-        """Open a file picker dialog to choose a book file for indexing."""
+        """Open a file picker dialog to choose a book file for indexing.
+
+        Args:
+            _e: The Flet button click event payload.
+        """
         self._logger.info("Opening file picker for book selection.")
         files = await ft.FilePicker().pick_files(
             dialog_title="Choose a book",
@@ -240,7 +304,11 @@ class IndexingView:
         self._vm.choose_file(Path(picked.path), picked.name)
 
     async def _on_start(self, _e: ft.Event[ft.Button]) -> None:
-        """Handle click on start indexing button."""
+        """Handle click on start indexing button.
+
+        Args:
+            _e: The Flet button click event payload.
+        """
         self._logger.info("Start indexing button clicked.")
         # async: starting a job creates an asyncio task (needs the running loop).
         self._vm.start()

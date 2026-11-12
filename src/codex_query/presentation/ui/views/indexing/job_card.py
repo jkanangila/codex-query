@@ -9,7 +9,7 @@ control buttons.
 import flet as ft
 
 from codex_query.application.ports.logger import LoggerFactoryPort
-from codex_query.presentation.ui.utils.flet_helpers import safe_update
+from codex_query.presentation.ui.utils.flet_helpers import bind_async, safe_update
 from codex_query.presentation.ui.viewmodels.job_card_viewmodel import (
     JobCardViewModel,
 )
@@ -24,6 +24,17 @@ class JobCardView:
 
     Observes a `JobCardViewModel` to dynamically update its view components,
     including stage progress, progress bar, counters, and action buttons.
+
+    Attributes:
+        _logger: Contextual component logger instance.
+        _vm: The `JobCardViewModel` instance containing the job's state.
+        title: Flet text control for the job title.
+        sub: Flet text control for the job status description.
+        stages: Flet row control representing pipeline stage indicators.
+        bar: Flet progress bar control showing job progress.
+        counter: Flet text control showing item count/progress counters.
+        toggle: Flet outlined button for pausing/resuming the job.
+        root: Root container Flet control encapsulating the card layout.
     """
 
     def __init__(self, vm: JobCardViewModel, logger_factory: LoggerFactoryPort) -> None:
@@ -44,7 +55,9 @@ class JobCardView:
         )
         self.bar = ft.ProgressBar(value=0)
         self.counter = ft.Text(size=TEXT_SMALL)
-        self.toggle = ft.OutlinedButton(content="Pause", on_click=self._on_toggle)
+        self.toggle = ft.OutlinedButton(
+            content="Pause", on_click=bind_async(self._vm.toggle)
+        )
         self.root = ft.Container(
             padding=PADDING,
             border_radius=BORDER_RADIUS,
@@ -61,7 +74,8 @@ class JobCardView:
                         [
                             self.toggle,
                             ft.IconButton(
-                                icon=ft.Icons.CLOSE, on_click=self._on_cancel
+                                icon=ft.Icons.CLOSE,
+                                on_click=bind_async(self._vm.cancel),
                             ),
                         ]
                     ),
@@ -94,14 +108,3 @@ class JobCardView:
         self._logger.debug("Rendering JobCardView updates.")
         self._apply()
         safe_update(self.root)
-
-    # ── View -> ViewModel ─────────────────────────────────────────────────
-    async def _on_toggle(self, _e: ft.Event[ft.OutlinedButton]) -> None:
-        """Handle toggle button click to pause or resume the job."""
-        self._logger.info("Toggle button clicked for job: %s", self._vm.title)
-        await self._vm.toggle()
-
-    async def _on_cancel(self, _e: ft.Event[ft.IconButton]) -> None:
-        """Handle cancel button click to abort the job."""
-        self._logger.warning("Cancel button clicked for job: %s", self._vm.title)
-        await self._vm.cancel()
