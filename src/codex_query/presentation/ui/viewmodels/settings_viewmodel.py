@@ -145,6 +145,7 @@ class SettingsViewModel(ObservableObject):
         _lock: Async lock for synchronizing read-modify-write cycles on settings.
         _test_results: Mapping of endpoints to their latest connection test results.
         _testing: Mapping of endpoints to their active testing status flags.
+        _editing_key: Mapping of endpoints to whether the user is replacing the key.
         _pending_draft: Staged settings draft awaiting re-index confirmation.
         _pending_stale: List of stale books affected by the pending embedding change.
     """
@@ -180,10 +181,16 @@ class SettingsViewModel(ObservableObject):
         }
         self._testing: dict[Endpoint, bool] = {"chat": False, "embedding": False}
 
+        # Whether the user asked to replace an already configured key. Whether the
+        # key field is shown is *derived* from this and the settings (see
+        # ``is_api_key_field_visible``), so it can never go stale.
+        self._editing_key: dict[Endpoint, bool] = {"chat": False, "embedding": False}
+
         # Draft awaiting the user's answer to the re-index confirmation dialog,
         # with the books that change would leave stale.
         self._pending_draft: Settings | None = None
         self._pending_stale: list[StaleBook] = []
+
         self._logger.info("Initialized SettingsViewModel")
 
     @property
@@ -199,26 +206,40 @@ class SettingsViewModel(ObservableObject):
         self,
         mutate: Callable[[Settings], None],
         *,
-        invalidate: Endpoint | None = None,
+        invalidate: Endpoint | Literal["all"] | None = None,
+        on_saved: Callable[[], None] | None = None,
     ) -> None:
         """Apply ``mutate`` to a fresh draft, persist it, and notify the view.
 
         The draft is created *inside* the lock, so two edits that arrive close
         together cannot both start from the same snapshot and overwrite each other.
 
+        ``mutate`` must only edit the draft. Anything else (UI flags, ...) belongs
+        in ``on_saved``, which runs only after the settings were persisted.
+
         Args:
             mutate: Callable that edits the settings draft in place.
             invalidate: Endpoint whose last connection-test result is now stale.
+            on_saved: Called after a successful save, before the view is notified.
         """
         async with self._lock:
             draft = self._use_cases.get_new_draft()
             mutate(draft)
             await self._use_cases.update_settings(draft)
+        if on_saved is not None:
+            on_saved()
         if invalidate is not None:
-            self._logger.debug(
-                "Invalidating connection test result for endpoint: %s", invalidate
-            )
-            self._test_results[invalidate] = None
+            if invalidate == "all":
+                self._logger.debug(
+                    "Invalidating all connection test results",
+                )
+                for endpoint in self._test_results:
+                    self._test_results[endpoint] = None
+            else:
+                self._logger.debug(
+                    "Invalidating connection test result for endpoint: %s", invalidate
+                )
+                self._test_results[invalidate] = None
         self.notify_changed()
 
     # ── Text Fields ───────────────────────────────────────────────────────
@@ -267,68 +288,6 @@ class SettingsViewModel(ObservableObject):
         await self._update(apply, invalidate="embedding")
 
     @property
-    def chat_api_key(self) -> str:
-        """API key hash for the chat service provider.
-
-        Returns:
-            The hashed chat API key string.
-        """
-        return self.settings.chat.api_key_hash
-
-    @property
-    def has_chat_api(self) -> bool:
-        """Whether the chat API key is configured.
-
-        Returns:
-            True if the chat API key is present, False otherwise.
-        """
-        return self.settings.chat.has_api_key
-
-    async def set_chat_api_key(self, value: str) -> None:
-        """Update and save the chat API key.
-
-        Args:
-            value: The new chat API key string.
-        """
-        self._logger.info("Updating chat API key")
-
-        def apply(draft: Settings) -> None:
-            draft.chat.api_key = value
-
-        await self._update(apply, invalidate="chat")
-
-    @property
-    def embedding_api_key(self) -> str:
-        """API key hash for the embedding service provider.
-
-        Returns:
-            The hashed embedding API key string.
-        """
-        return self.settings.embedding.api_key_hash
-
-    @property
-    def has_embedding_api(self) -> bool:
-        """Whether the embedding API key is configured.
-
-        Returns:
-            True if the embedding API key is present, False otherwise.
-        """
-        return self.settings.embedding.has_api_key
-
-    async def set_embedding_api_key(self, value: str) -> None:
-        """Update and save the embedding API key.
-
-        Args:
-            value: The new embedding API key string.
-        """
-        self._logger.info("Updating embedding API key")
-
-        def apply(draft: Settings) -> None:
-            draft.embedding.api_key = value
-
-        await self._update(apply, invalidate="embedding")
-
-    @property
     def chat_model(self) -> str:
         """Active model name for the chat service.
 
@@ -371,6 +330,133 @@ class SettingsViewModel(ObservableObject):
             draft.embedding.model = value.strip()
 
         await self._update_embedding(apply)
+
+    # ── API Keys ──────────────────────────────────────────────────────────
+    # The stored key itself is deliberately not exposed to the view: the view only
+    # needs to know whether a key exists and a short fingerprint to display.
+    def has_api_key(self, endpoint: Endpoint) -> bool:
+        """Whether an API key is configured for ``endpoint``.
+
+        Args:
+            endpoint: The service endpoint to query.
+
+        Returns:
+            True if a key is stored for the endpoint, False otherwise.
+        """
+        settings = self.settings
+        config = settings.chat if endpoint == "chat" else settings.embedding
+        return config.has_api_key
+
+    @property
+    def has_chat_api(self) -> bool:
+        """Whether the chat API key is configured.
+
+        Returns:
+            True if the chat API key is present, False otherwise.
+        """
+        return self.has_api_key("chat")
+
+    @property
+    def has_embedding_api(self) -> bool:
+        """Whether the embedding API key is configured.
+
+        Returns:
+            True if the embedding API key is present, False otherwise.
+        """
+        return self.has_api_key("embedding")
+
+    def api_key_hash(self, endpoint: Endpoint) -> str:
+        """Short fingerprint of the stored key, safe to display.
+
+        Args:
+            endpoint: The service endpoint to query.
+
+        Returns:
+            The key fingerprint, or an empty string if no key is stored.
+        """
+        settings = self.settings
+        config = settings.chat if endpoint == "chat" else settings.embedding
+        return config.api_key_hash
+
+    def is_api_key_field_visible(self, endpoint: Endpoint) -> bool:
+        """Whether the key input should be shown instead of the "Configured" row.
+
+        Derived state: the input is shown when no key exists yet, or while the
+        user is replacing the existing one.
+
+        Args:
+            endpoint: The service endpoint to query.
+
+        Returns:
+            True if the key input field should be visible.
+        """
+        return self._editing_key[endpoint] or not self.has_api_key(endpoint)
+
+    def begin_edit_api_key(self, endpoint: Endpoint) -> None:
+        """Start replacing the configured key (shows the input field).
+
+        Args:
+            endpoint: The service endpoint whose key is being replaced.
+        """
+        self._logger.debug("Beginning API key edit for endpoint: %s", endpoint)
+        self._editing_key[endpoint] = True
+        self.notify_changed()
+
+    def cancel_edit_api_key(self, endpoint: Endpoint) -> None:
+        """Abandon replacing the key and go back to the "Configured" row.
+
+        Args:
+            endpoint: The service endpoint whose edit is cancelled.
+        """
+        self._logger.debug("Cancelling API key edit for endpoint: %s", endpoint)
+        self._editing_key[endpoint] = False
+        self.notify_changed()
+
+    async def set_api_key(self, endpoint: Endpoint, value: str) -> None:
+        """Update and save the API key of ``endpoint``.
+
+        An empty value is ignored: clearing the field must not silently delete a
+        stored key. If the other endpoint uses the same provider and has no key
+        yet, it receives the same key.
+
+        Args:
+            endpoint: The service endpoint the key belongs to.
+            value: The new API key string.
+        """
+        value = value.strip()
+        if not value:
+            self._logger.debug("Ignoring empty API key for endpoint: %s", endpoint)
+            return
+        self._logger.info("Updating %s API key", endpoint)
+
+        def apply(draft: Settings) -> None:
+            this = draft.chat if endpoint == "chat" else draft.embedding
+            other = draft.embedding if endpoint == "chat" else draft.chat
+            this.api_key = value
+            if other.provider == this.provider and not other.has_api_key:
+                other.api_key = value
+
+        def saved() -> None:
+            for key in self._editing_key:
+                self._editing_key[key] = False
+
+        await self._update(apply, invalidate="all", on_saved=saved)
+
+    async def set_chat_api_key(self, value: str) -> None:
+        """Update and save the chat API key.
+
+        Args:
+            value: The new chat API key string.
+        """
+        await self.set_api_key("chat", value)
+
+    async def set_embedding_api_key(self, value: str) -> None:
+        """Update and save the embedding API key.
+
+        Args:
+            value: The new embedding API key string.
+        """
+        await self.set_api_key("embedding", value)
 
     # ── Select Fields ─────────────────────────────────────────────────────
     @property
@@ -640,7 +726,7 @@ class SettingsViewModel(ObservableObject):
                 await self._use_cases.update_settings(draft)
             else:
                 self._logger.warning(
-                    "Embedding change results in %d stale book(s) requiring re-indexing",
+                    "Embedding change leaves %d stale book(s) requiring re-indexing",
                     len(stale),
                 )
                 self._pending_draft = draft

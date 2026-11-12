@@ -53,11 +53,11 @@ class SettingsView:
         chat_provider: Dropdown tile for selecting the chat service provider.
         chat_base_url: Text field tile for the chat service base URL.
         chat_model: Text field tile for the active chat model name.
-        chat_api_key: Text field tile for the chat API key/hash.
+        chat_api_key: Write-only tile for the chat API key.
         embedding_provider: Dropdown tile for selecting the embedding provider.
         embedding_base_url: Text field tile for the embedding service base URL.
         embedding_model: Text field tile for the active embedding model name.
-        embedding_api_key: Text field tile for the embedding API key/hash.
+        embedding_api_key: Write-only tile for the embedding API key.
         preset: Choice component for selecting configuration presets.
         preset_tile: Setting tile encapsulating the preset choice component.
         estimate: Text control displaying token consumption estimates.
@@ -78,10 +78,6 @@ class SettingsView:
         self._logger.debug("Initializing SettingsView UI layout and controls.")
 
         # ── Chat Service ──────────────────────────────────────────────────
-        # TODO: add a indicator showing whether an api key has been set
-        # text saying API Key: ● Configured (a1b2c3d4) | Enter new text
-        # to replace existing
-        # API Key: Not configured
         self.chat_provider = DropdownTile(
             text=TEXT.chat_provider,
             value=vm.chat_provider,
@@ -98,12 +94,7 @@ class SettingsView:
             value=vm.chat_model,
             on_change=vm.set_chat_model,
         )
-        self.chat_api_key = TextFieldTile(
-            text=TEXT.chat_api_key,
-            value=vm.chat_api_key,
-            on_change=vm.set_chat_api_key,
-            password=True,
-        )
+        self.chat_api_key = self._build_api_key_tile("chat")
 
         # ── Embedding Service ─────────────────────────────────────────────
         self.embedding_provider = DropdownTile(
@@ -125,12 +116,7 @@ class SettingsView:
             on_change=vm.set_embedding_model,
             commit_delay=None,
         )
-        self.embedding_api_key = TextFieldTile(
-            text=TEXT.embedding_api_key,
-            value=vm.embedding_api_key,
-            on_change=vm.set_embedding_api_key,
-            password=True,
-        )
+        self.embedding_api_key = self._build_api_key_tile("embedding")
 
         self._text_tiles: dict[Endpoint, list[TextFieldTile]] = {
             "chat": [self.chat_base_url, self.chat_model, self.chat_api_key],
@@ -139,6 +125,10 @@ class SettingsView:
                 self.embedding_model,
                 self.embedding_api_key,
             ],
+        }
+        self._key_tiles: dict[Endpoint, TextFieldTile] = {
+            "chat": self.chat_api_key,
+            "embedding": self.embedding_api_key,
         }
         self._test_rows: dict[Endpoint, ConnectionTestRow] = {
             "chat": ConnectionTestRow(self._tester("chat")),
@@ -224,6 +214,40 @@ class SettingsView:
         self._logger.debug("SettingsView initialized successfully.")
 
     # ── Builders ──────────────────────────────────────────────────────────
+    def _build_api_key_tile(self, endpoint: Endpoint) -> TextFieldTile:
+        """Builds the write-only API key tile for an endpoint.
+
+        The field starts empty and never shows the stored key. While a key is
+        configured it is replaced by a "Configured" row with an edit button. A key
+        is committed only on blur / Enter, never mid-typing, so a pause while
+        pasting or typing cannot save a partial key.
+
+        Args:
+            endpoint: The target endpoint identifier.
+
+        Returns:
+            A configured `TextFieldTile` instance.
+        """
+        vm = self._vm
+
+        async def on_change(value: str) -> None:
+            self._logger.info("Committing new API key for endpoint: %s", endpoint)
+            await vm.set_api_key(endpoint, value)
+
+        return TextFieldTile(
+            text=TEXT.chat_api_key if endpoint == "chat" else TEXT.embedding_api_key,
+            value="",
+            on_change=on_change,
+            password=True,
+            commit_delay=None,
+            is_api_key_field=True,
+            field_visible=vm.is_api_key_field_visible(endpoint),
+            has_key=vm.has_api_key(endpoint),
+            api_key_hash=vm.api_key_hash(endpoint),
+            on_edit_key=lambda: vm.begin_edit_api_key(endpoint),
+            on_cancel_edit=lambda: vm.cancel_edit_api_key(endpoint),
+        )
+
     def _build_slider(self, spec: TuningSlider) -> SliderTile:
         """Builds and returns a slider tile for a given tuning specification.
 
@@ -310,13 +334,19 @@ class SettingsView:
             (self.chat_provider, vm.chat_provider),
             (self.chat_base_url, vm.chat_base_url),
             (self.chat_model, vm.chat_model),
-            (self.chat_api_key, vm.chat_api_key),
             (self.embedding_provider, vm.embedding_provider),
             (self.embedding_base_url, vm.embedding_base_url),
             (self.embedding_model, vm.embedding_model),
-            (self.embedding_api_key, vm.embedding_api_key),
         ):
             field.sync(value)
+
+        # Key tiles are write-only: they only mirror "configured / editing" state.
+        for endpoint, tile in self._key_tiles.items():
+            tile.set_key_state(
+                field_visible=vm.is_api_key_field_visible(endpoint),
+                has_key=vm.has_api_key(endpoint),
+                key_hash=vm.api_key_hash(endpoint),
+            )
 
         self.preset.set(vm.preset_key)
         for state in vm.tuning:
