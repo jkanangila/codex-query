@@ -8,10 +8,18 @@ from codex_query.presentation.ui.viewmodels.events.ui_events import UiEvents
 
 
 class ChatMessageViewModel(ObservableObject):
-    """One message. Assistant messages change while the answer streams in.
+    """Chat message view model for managing message state, streaming, and sources.
 
-    Each message is its own observable so a token only redraws *its* bubble, not
-    the whole conversation.
+    Assistant messages change while the answer streams in. Each message is its own
+    observable so a token only redraws *its* bubble, not the whole conversation.
+
+    Attributes:
+        role: The role of the message author (e.g., user, assistant).
+        _logger: Logger instance for recording view model events.
+        _events: UI event dispatcher for handling shell interactions.
+        _text: The raw underlying message text content.
+        _sources: List of passages cited by this message.
+        _error: Error message string if an error occurred during generation.
     """
 
     def __init__(
@@ -21,7 +29,7 @@ class ChatMessageViewModel(ObservableObject):
         events: UiEvents,
         text: str = "",
     ) -> None:
-        """Initialize the chat message view model.
+        """Initializes the ChatMessageViewModel.
 
         Args:
             role: The role of the message author (e.g., user, assistant).
@@ -46,7 +54,7 @@ class ChatMessageViewModel(ObservableObject):
         """Markdown to display (error text already applied).
 
         Returns:
-            str: The message text, appended with error formatting if present.
+            The message text, appended with error formatting if present.
         """
         if self._error is not None:
             return f"{self._text}\n\n*Error: {self._error}*"
@@ -67,7 +75,7 @@ class ChatMessageViewModel(ObservableObject):
         """The raw underlying message text without appended error markers.
 
         Returns:
-            str: The unformatted raw text.
+            The unformatted raw text.
         """
         return self._text
 
@@ -76,7 +84,7 @@ class ChatMessageViewModel(ObservableObject):
         """Passages cited by this answer (empty for user messages).
 
         Returns:
-            list[SourceRef]: Cited source references.
+            Cited source references.
         """
         return self._sources
 
@@ -85,7 +93,7 @@ class ChatMessageViewModel(ObservableObject):
         """Check if assistant message has nothing to show yet (no token, no error).
 
         Returns:
-            bool: True if waiting for the first response token, False otherwise.
+            True if waiting for the first response token, False otherwise.
         """
         return self.role is Role.ASSISTANT and not self._text and self._error is None
 
