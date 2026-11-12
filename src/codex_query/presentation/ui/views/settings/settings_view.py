@@ -46,6 +46,22 @@ class SettingsView:
 
     Manages UI tiles, layouts, and data binding for chat endpoints, embedding
     endpoints, presets, and model tuning parameters.
+
+    Attributes:
+        _vm: The settings view model containing application state and logic.
+        _logger: Contextual component logger instance.
+        chat_provider: Dropdown tile for selecting the chat service provider.
+        chat_base_url: Text field tile for the chat service base URL.
+        chat_model: Text field tile for the active chat model name.
+        chat_api_key: Text field tile for the chat API key/hash.
+        embedding_provider: Dropdown tile for selecting the embedding provider.
+        embedding_base_url: Text field tile for the embedding service base URL.
+        embedding_model: Text field tile for the active embedding model name.
+        embedding_api_key: Text field tile for the embedding API key/hash.
+        preset: Choice component for selecting configuration presets.
+        preset_tile: Setting tile encapsulating the preset choice component.
+        estimate: Text control displaying token consumption estimates.
+        root: Root container Flet control holding the complete view hierarchy.
     """
 
     def __init__(
@@ -62,6 +78,10 @@ class SettingsView:
         self._logger.debug("Initializing SettingsView UI layout and controls.")
 
         # ── Chat Service ──────────────────────────────────────────────────
+        # TODO: add a indicator showing whether an api key has been set
+        # text saying API Key: ● Configured (a1b2c3d4) | Enter new text
+        # to replace existing
+        # API Key: Not configured
         self.chat_provider = DropdownTile(
             text=TEXT.chat_provider,
             value=vm.chat_provider,
