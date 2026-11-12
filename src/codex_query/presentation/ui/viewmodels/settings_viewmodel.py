@@ -57,7 +57,7 @@ class _TuningSpec:
         minimum: Minimum allowable slider value.
         maximum: Maximum allowable slider value.
         step: Incremental step size.
-        cast: Function to convert the float value into the correct real setting type.
+        cast: Converts the slider's float to the setting's real type.
     """
 
     key: TuningKeys
@@ -66,7 +66,6 @@ class _TuningSpec:
     maximum: float
     step: float
     cast: Callable[[float], float]
-    """Converts the slider's float to the setting's real type."""
 
 
 @dataclass(frozen=True, slots=True)
@@ -136,7 +135,19 @@ _SPECS_BY_KEY = {s.key: s for s in _SPECS}
 
 
 class SettingsViewModel(ObservableObject):
-    """View model managing user preferences, parameters, and service connections."""
+    """View model managing user preferences, parameters, and service connections.
+
+    Attributes:
+        _use_cases: The settings facade for retrieving and updating configurations.
+        _events: UI event emitter for toasts and dialog triggers.
+        _on_reindex: Callback invoked with stale book IDs after embedding changes.
+        _logger: Contextual logger instance.
+        _lock: Async lock for synchronizing read-modify-write cycles on settings.
+        _test_results: Mapping of endpoints to their latest connection test results.
+        _testing: Mapping of endpoints to their active testing status flags.
+        _pending_draft: Staged settings draft awaiting re-index confirmation.
+        _pending_stale: List of stale books affected by the pending embedding change.
+    """
 
     def __init__(
         self,
@@ -145,15 +156,14 @@ class SettingsViewModel(ObservableObject):
         logger_factory: LoggerFactoryPort,
         on_reindex: Callable[[Sequence[int]], Awaitable[None]] | None = None,
     ) -> None:
-        """Initialize the settings view model.
+        """Initializes the SettingsViewModel.
 
         Args:
             use_cases: The settings facade for retrieving and updating configurations.
             events: UI event emitter for toasts and dialog triggers.
             logger_factory: Factory used to create a contextual logger.
-            on_reindex: Called with the ids of the stale books once the user has
-                confirmed an embedding change. Settings knows nothing about
-                indexing; the app view model supplies this.
+            on_reindex: Called with the IDs of stale books once the user confirms
+                an embedding change.
         """
         super().__init__()
         self._use_cases = use_cases
@@ -178,7 +188,11 @@ class SettingsViewModel(ObservableObject):
 
     @property
     def settings(self) -> Settings:
-        """Retrieve current application settings."""
+        """Retrieve current application settings.
+
+        Returns:
+            The current active `Settings` instance.
+        """
         return self._use_cases.get_current()
 
     async def _update(
@@ -190,11 +204,10 @@ class SettingsViewModel(ObservableObject):
         """Apply ``mutate`` to a fresh draft, persist it, and notify the view.
 
         The draft is created *inside* the lock, so two edits that arrive close
-        together (e.g. a slider release and a text field commit) cannot both start
-        from the same snapshot and overwrite each other.
+        together cannot both start from the same snapshot and overwrite each other.
 
         Args:
-            mutate: Edits the draft in place.
+            mutate: Callable that edits the settings draft in place.
             invalidate: Endpoint whose last connection-test result is now stale.
         """
         async with self._lock:
@@ -211,11 +224,19 @@ class SettingsViewModel(ObservableObject):
     # ── Text Fields ───────────────────────────────────────────────────────
     @property
     def chat_base_url(self) -> str:
-        """Base URL for the chat service provider."""
+        """Base URL for the chat service provider.
+
+        Returns:
+            The chat service base URL string.
+        """
         return self.settings.chat.base_url
 
     async def set_chat_base_url(self, value: str) -> None:
-        """Update and save the chat service base URL."""
+        """Update and save the chat service base URL.
+
+        Args:
+            value: The new chat service base URL.
+        """
         self._logger.info("Updating chat base URL")
 
         def apply(draft: Settings) -> None:
@@ -225,11 +246,19 @@ class SettingsViewModel(ObservableObject):
 
     @property
     def embedding_base_url(self) -> str:
-        """Base URL for the embedding service provider."""
+        """Base URL for the embedding service provider.
+
+        Returns:
+            The embedding service base URL string.
+        """
         return self.settings.embedding.base_url
 
     async def set_embedding_base_url(self, value: str) -> None:
-        """Update and save the embedding service base URL."""
+        """Update and save the embedding service base URL.
+
+        Args:
+            value: The new embedding service base URL.
+        """
         self._logger.info("Updating embedding base URL")
 
         def apply(draft: Settings) -> None:
@@ -239,11 +268,28 @@ class SettingsViewModel(ObservableObject):
 
     @property
     def chat_api_key(self) -> str:
-        """API key for the chat service provider."""
-        return self.settings.chat.api_key
+        """API key hash for the chat service provider.
+
+        Returns:
+            The hashed chat API key string.
+        """
+        return self.settings.chat.api_key_hash
+
+    @property
+    def has_chat_api(self) -> bool:
+        """Whether the chat API key is configured.
+
+        Returns:
+            True if the chat API key is present, False otherwise.
+        """
+        return self.settings.chat.has_api_key
 
     async def set_chat_api_key(self, value: str) -> None:
-        """Update and save the chat API key."""
+        """Update and save the chat API key.
+
+        Args:
+            value: The new chat API key string.
+        """
         self._logger.info("Updating chat API key")
 
         def apply(draft: Settings) -> None:
@@ -253,11 +299,28 @@ class SettingsViewModel(ObservableObject):
 
     @property
     def embedding_api_key(self) -> str:
-        """API key for the embedding service provider."""
-        return self.settings.embedding.api_key
+        """API key hash for the embedding service provider.
+
+        Returns:
+            The hashed embedding API key string.
+        """
+        return self.settings.embedding.api_key_hash
+
+    @property
+    def has_embedding_api(self) -> bool:
+        """Whether the embedding API key is configured.
+
+        Returns:
+            True if the embedding API key is present, False otherwise.
+        """
+        return self.settings.embedding.has_api_key
 
     async def set_embedding_api_key(self, value: str) -> None:
-        """Update and save the embedding API key."""
+        """Update and save the embedding API key.
+
+        Args:
+            value: The new embedding API key string.
+        """
         self._logger.info("Updating embedding API key")
 
         def apply(draft: Settings) -> None:
@@ -267,11 +330,19 @@ class SettingsViewModel(ObservableObject):
 
     @property
     def chat_model(self) -> str:
-        """Active model name for the chat service."""
+        """Active model name for the chat service.
+
+        Returns:
+            The chat model name string.
+        """
         return self.settings.chat.model
 
     async def set_chat_model(self, value: str) -> None:
-        """Update and save the active chat model."""
+        """Update and save the active chat model.
+
+        Args:
+            value: The new chat model name.
+        """
         self._logger.info("Updating active chat model to '%s'", value)
 
         def apply(draft: Settings) -> None:
@@ -281,11 +352,19 @@ class SettingsViewModel(ObservableObject):
 
     @property
     def embedding_model(self) -> str:
-        """Active model name for the embedding service."""
+        """Active model name for the embedding service.
+
+        Returns:
+            The embedding model name string.
+        """
         return self.settings.embedding.model
 
     async def set_embedding_model(self, value: str) -> None:
-        """Update, or stage for confirmation, the active embedding model."""
+        """Update, or stage for confirmation, the active embedding model.
+
+        Args:
+            value: The new embedding model name.
+        """
         self._logger.info("Setting active embedding model to '%s'", value.strip())
 
         def apply(draft: Settings) -> None:
@@ -296,18 +375,30 @@ class SettingsViewModel(ObservableObject):
     # ── Select Fields ─────────────────────────────────────────────────────
     @property
     def chat_provider_options(self) -> list[str]:
-        """Display names of the selectable chat providers."""
+        """Display names of the selectable chat providers.
+
+        Returns:
+            A list of chat provider option names.
+        """
         return list(CHAT_PROVIDER_OPTIONS)
 
     @property
     def chat_provider(self) -> str:
-        """Display name of the current chat provider (a key of the options)."""
+        """Display name of the current chat provider.
+
+        Returns:
+            The display name string of the active chat provider.
+        """
         provider = self.settings.chat.provider
         config = CHAT_PROVIDER_CONFIGS.get(provider)
         return config.name if config else str(provider)
 
     async def select_chat_provider(self, key: str) -> None:
-        """Select and persist a new chat service provider."""
+        """Select and persist a new chat service provider.
+
+        Args:
+            key: The option key corresponding to the selected provider.
+        """
         self._logger.info("Selecting chat provider option: '%s'", key)
         provider = CHAT_PROVIDER_OPTIONS[key]
 
@@ -318,18 +409,30 @@ class SettingsViewModel(ObservableObject):
 
     @property
     def embedding_provider_options(self) -> list[str]:
-        """Display names of the selectable embedding providers."""
+        """Display names of the selectable embedding providers.
+
+        Returns:
+            A list of embedding provider option names.
+        """
         return list(EMBEDDING_PROVIDER_OPTIONS)
 
     @property
     def embedding_provider(self) -> str:
-        """Display name of the current embedding provider (a key of the options)."""
+        """Display name of the current embedding provider.
+
+        Returns:
+            The display name string of the active embedding provider.
+        """
         provider = self.settings.embedding.provider
         config = EMBEDDING_PROVIDER_CONFIGS.get(provider)
         return config.name if config else str(provider)
 
     async def select_embedding_provider(self, key: str) -> None:
-        """Select, or stage for confirmation, a new embedding provider."""
+        """Select, or stage for confirmation, a new embedding provider.
+
+        Args:
+            key: The option key corresponding to the selected embedding provider.
+        """
         self._logger.info("Selecting embedding provider option: '%s'", key)
         provider = EMBEDDING_PROVIDER_OPTIONS[key]
 
@@ -341,21 +444,37 @@ class SettingsViewModel(ObservableObject):
     # ── Choices ───────────────────────────────────────────────────────────
     @property
     def preset_options(self) -> list[tuple[str, str]]:
-        """``(key, label)`` pairs for the preset selector."""
+        """``(key, label)`` pairs for the preset selector.
+
+        Returns:
+            A list of tuples containing preset keys and human-readable labels.
+        """
         return PRESET_OPTIONS
 
     @property
     def preset(self) -> PresetMode:
-        """Current configuration preset mode."""
+        """Current configuration preset mode.
+
+        Returns:
+            The active `PresetMode` enumeration value.
+        """
         return self.settings.preset_mode
 
     @property
     def preset_key(self) -> str:
-        """Key of the current preset, matching :attr:`preset_options`."""
+        """Key of the current preset, matching :attr:`preset_options`.
+
+        Returns:
+            The string key of the current preset mode.
+        """
         return self.settings.preset_mode.value
 
     async def select_preset(self, key: str) -> None:
-        """Switch and persist a configuration preset mode."""
+        """Switch and persist a configuration preset mode.
+
+        Args:
+            key: The preset mode key to switch to.
+        """
         self._logger.info("Switching configuration preset mode to '%s'", key)
         mode = PresetMode(key)
 
@@ -367,7 +486,11 @@ class SettingsViewModel(ObservableObject):
     # ── Tuning ────────────────────────────────────────────────────────────
     @property
     def tuning(self) -> list[TuningSlider]:
-        """Generate a list of current tuning sliders for the UI."""
+        """Generate a list of current tuning sliders for the UI.
+
+        Returns:
+            A list of `TuningSlider` configurations reflecting active settings.
+        """
         settings = self.settings
         return [
             TuningSlider(
@@ -384,6 +507,10 @@ class SettingsViewModel(ObservableObject):
     async def set_tuning(self, key: str, value: float) -> None:
         """Update a specific tuning parameter, switch to custom mode, and save.
 
+        Args:
+            key: The tuning parameter identifier.
+            value: The new numerical value for the parameter.
+
         Raises:
             KeyError: For an unknown slider key.
         """
@@ -398,7 +525,11 @@ class SettingsViewModel(ObservableObject):
 
     @property
     def estimate_text(self) -> str:
-        """Human-readable estimation string of token consumption per question."""
+        """Human-readable estimation string of token consumption per question.
+
+        Returns:
+            A formatted token estimation string.
+        """
         tokens = self.settings.est_tokens()
         return f"Estimated up to ~{tokens:,} tokens per question (free on local models)"
 
@@ -407,15 +538,32 @@ class SettingsViewModel(ObservableObject):
         """Latest connection test result for ``endpoint``, if still valid.
 
         Editing the endpoint's provider, URL, model or key discards the result.
+
+        Args:
+            endpoint: The service endpoint to query.
+
+        Returns:
+            The latest `ConnectionTestResult`, or None if invalid or untested.
         """
         return self._test_results[endpoint]
 
     def is_testing(self, endpoint: Endpoint) -> bool:
-        """Whether a connection test for ``endpoint`` is currently running."""
+        """Whether a connection test for ``endpoint`` is currently running.
+
+        Args:
+            endpoint: The service endpoint to check.
+
+        Returns:
+            True if a test is in progress, False otherwise.
+        """
         return self._testing[endpoint]
 
     async def test_connection(self, endpoint: Endpoint) -> None:
-        """Probe an endpoint and publish testing status followed by the outcome."""
+        """Probe an endpoint and publish testing status followed by the outcome.
+
+        Args:
+            endpoint: The service endpoint to test.
+        """
         if self._testing[endpoint]:
             self._logger.debug(
                 "Connection test for %s already in progress; skipping", endpoint
@@ -473,7 +621,11 @@ class SettingsViewModel(ObservableObject):
         self.notify_changed()
 
     async def _update_embedding(self, mutate: Callable[[Settings], None]) -> None:
-        """Apply an embedding edit, or stage it if books would need re-indexing."""
+        """Apply an embedding edit, or stage it if books would need re-indexing.
+
+        Args:
+            mutate: Callable that edits the embedding settings draft in place.
+        """
         self._logger.debug("Evaluating embedding compatibility for change...")
         stale: list[StaleBook] = []
         async with self._lock:
@@ -488,7 +640,7 @@ class SettingsViewModel(ObservableObject):
                 await self._use_cases.update_settings(draft)
             else:
                 self._logger.warning(
-                    "Embedding change results in %d stale book(s) requiring re-indexing",  # noqa: E501
+                    "Embedding change results in %d stale book(s) requiring re-indexing",
                     len(stale),
                 )
                 self._pending_draft = draft

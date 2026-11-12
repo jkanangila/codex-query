@@ -30,6 +30,18 @@ class ChatViewModel(ObservableObject):
     ``notify_changed`` fires when the *list* of messages, the title or the input
     text is reset; token-by-token changes are announced by the individual
     :class:`ChatMessageViewModel`.
+
+    Attributes:
+        _use_cases: Application use cases facade.
+        ui_events: UI event dispatcher for handling shell interactions.
+        _logger_factory: Factory port for instantiating class loggers.
+        _logger: Contextual logger instance.
+        _book_id: Unique identifier of the currently scoped book, if any.
+        _messages: List of chat message view models in the conversation.
+        _busy: Flag indicating whether a question is currently being processed.
+        _title: Formatted scope title representing the active book or context.
+        question: Text of the input box, written by the view as the user types.
+        sources: Child ViewModel for the side panel, filled from each answer's sources.
     """
 
     def __init__(
@@ -38,7 +50,7 @@ class ChatViewModel(ObservableObject):
         ui_events: UiEvents,
         logger_factory: LoggerFactoryPort,
     ) -> None:
-        """Initialize the chat view model.
+        """Initializes the ChatViewModel.
 
         Args:
             use_cases: Application use cases facade.
@@ -57,7 +69,7 @@ class ChatViewModel(ObservableObject):
         self._title = scope_title([])
         self.question = ""
         """Text of the input box. Written by the view as the user types (no redraw)."""
-        self.sources = SourcesViewModel()
+        self.sources = SourcesViewModel(logger_factory)
         """Child ViewModel for side panel; filled from each answer's Sources event."""
         self._logger.debug("Initialized ChatViewModel")
 
@@ -66,7 +78,7 @@ class ChatViewModel(ObservableObject):
         """The scope title representing active books or context.
 
         Returns:
-            str: The formatted scope title.
+            The formatted scope title string.
         """
         return self._title
 
@@ -75,7 +87,7 @@ class ChatViewModel(ObservableObject):
         """The list of chat message view models in the conversation.
 
         Returns:
-            list[ChatMessageViewModel]: Active messages.
+            Active message view models.
         """
         return self._messages
 
@@ -84,7 +96,7 @@ class ChatViewModel(ObservableObject):
         """Whether a question is currently being processed and streamed.
 
         Returns:
-            bool: True if busy, False otherwise.
+            True if busy, False otherwise.
         """
         return self._busy
 
@@ -93,7 +105,7 @@ class ChatViewModel(ObservableObject):
         """Whether at least one book is selected.
 
         Returns:
-            bool: True if a book scope is active, False otherwise.
+            True if a book scope is active, False otherwise.
         """
         return bool(self._book_id)
 

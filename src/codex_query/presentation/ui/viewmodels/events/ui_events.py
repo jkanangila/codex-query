@@ -8,6 +8,7 @@ from codex_query.application.use_cases.settings.check_embedding_compatibility im
     StaleBook,
 )
 from codex_query.domain.models.rag import SourceRef
+from codex_query.presentation.ui.viewmodels.navigation import Tab
 
 
 @dataclass(frozen=True, slots=True)
@@ -34,12 +35,15 @@ class UiEvents:
     """
 
     def __init__(self) -> None:
+        # Show a transient message.
         self.toast: Signal[str] = Signal()
-        """Show a transient message."""
-        self.source_requested: Signal[SourceRef] = Signal()
-        """Show the full text of a retrieved passage."""
-        self.embedding_reindex_requested: Signal[EmbeddingChangeRequest] = Signal()
-        """Ask the user to confirm an embedding model or provider change.
 
-        Such a change requires re-indexing the affected books.
-        """
+        # Show the full text of a retrieved passage.
+        self.source_requested: Signal[SourceRef] = Signal()
+
+        # Ask the user to confirm an embedding model or provider change.
+        # Such a change requires re-indexing the affected books.
+        self.embedding_reindex_requested: Signal[EmbeddingChangeRequest] = Signal()
+
+        # navigate to specified tab
+        self.tab_navigation_requested: Signal[Tab] = Signal()
