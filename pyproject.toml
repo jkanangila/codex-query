@@ -22,7 +22,7 @@ dependencies = [
   "ebooklib>=0.18",
   # Interface & UI
   "click>=8.1",
-  "flet>=0.80",
+  "flet>=1.1",
   "flet-secure-storage>=1.0.1",
   "questionary>=2.1",
   "rich>=14.0",

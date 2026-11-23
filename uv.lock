@@ -1,5 +1,5 @@
 version = 1
-revision = 3
+revision = 5
 requires-python = ">=3.12"
 resolution-markers = [
     "python_full_version >= '3.14'",
@@ -638,9 +638,7 @@ source = { editable = "." }
 dependencies = [
     { name = "aiosqlite" },
     { name = "alembic" },
-    { name = "asyncpg" },
     { name = "beautifulsoup4" },
-    { name = "chromadb" },
     { name = "click" },
     { name = "ebooklib" },
     { name = "flet" },
@@ -657,6 +655,7 @@ dependencies = [
 
 [package.optional-dependencies]
 desktop = [
+    { name = "asyncpg" },
     { name = "chromadb" },
 ]
 
@@ -679,10 +678,9 @@ dev = [
 requires-dist = [
     { name = "aiosqlite", specifier = ">=0.22.1" },
     { name = "alembic", specifier = ">=1.20.0" },
-    { name = "asyncpg", specifier = ">=0.31.0" },
+    { name = "asyncpg", marker = "extra == 'desktop'", specifier = ">=0.31.0" },
     { name = "beautifulsoup4", specifier = ">=4.13" },
-    { name = "chromadb", specifier = ">=1.5.9" },
-    { name = "chromadb", marker = "extra == 'desktop'", specifier = ">=1.0" },
+    { name = "chromadb", marker = "extra == 'desktop'", specifier = ">=1.5.9" },
     { name = "click", specifier = ">=8.1" },
     { name = "ebooklib", specifier = ">=0.18" },
     { name = "flet", specifier = ">=0.80" },
@@ -926,7 +924,7 @@ wheels = [
 
 [[package]]
 name = "flet"
-version = "1.0.1"
+version = "1.1.3"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "httpx", marker = "sys_platform != 'emscripten'" },
@@ -934,21 +932,21 @@ dependencies = [
     { name = "oauthlib", marker = "sys_platform != 'emscripten'" },
     { name = "repath" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/5e/0f/ac7e2af03fd49dd28477a062f8022a362155a2608857c79d6a4272e4f4a3/flet-1.0.1.tar.gz", hash = "sha256:0c11ea010efbae34600556d964613324ea0ddc711bdac94d6592699b28dc0ba4", size = 571070, upload-time = "2026-09-22T20:24:47.549Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/cb/b3/f7159155fca336f8fa8d49dc9a0cfdd61809fac01286cfee2e3d1b7bf255/flet-1.1.3.tar.gz", hash = "sha256:f0e33339064a8cd4a08bcadf5e06295ec5cd6eaf3e4216ee330b021adf28160c", size = 632020, upload-time = "2026-11-22T22:50:32.875Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/4e/86/6eaa2f957931ee03f9814838259d5df395295c7807673b9ea2a30f75f4c5/flet-1.0.1-py3-none-any.whl", hash = "sha256:94a15d75f587dc0b6a2479348f2e4b2bf40606469eb5a18dc62ab12a790f1ae2", size = 633955, upload-time = "2026-09-22T20:24:46.225Z" },
+    { url = "https://files.pythonhosted.org/packages/5f/6b/086425d6ab8bec87931801f199657c78d4939531ec4f4e570de46503d79a/flet-1.1.3-py3-none-any.whl", hash = "sha256:323e89c37a34d53e08a515765e61bab551b117382c096e27110a922bcad3cd5f", size = 666632, upload-time = "2026-11-22T22:50:31.441Z" },
 ]
 
 [[package]]
 name = "flet-secure-storage"
-version = "1.0.1"
+version = "1.1.3"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "flet" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/56/a7/6f2ddf0faf5f5f6333b7a36b531f408001a0b336ef5fb113ff14d3f01d24/flet_secure_storage-1.0.1.tar.gz", hash = "sha256:fee9b205dc4a9cbdf9e8d1ede1cc5f0fccf6910bf079cdafa045a783554ed666", size = 15965, upload-time = "2026-09-22T20:25:50.829Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/7c/5f/8199485ec0ca3b85ec40daf593d40f44c7d5a48b4535ce83c407adec037a/flet_secure_storage-1.1.3.tar.gz", hash = "sha256:b5dbe1f4b66d3f9fceb3f2e48773e01978ccd975cea1165a935f528b6ab09ca5", size = 16049, upload-time = "2026-11-22T22:51:33.682Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/f4/9f/77dab33b3d504d9889a49c7ca44a6b218f3d9a2148b813ecd3102651a646/flet_secure_storage-1.0.1-py3-none-any.whl", hash = "sha256:bff3d0adb351b8b4e6f9d94a45301733166561f3c827d316bf8af613b2ba84c3", size = 16669, upload-time = "2026-09-22T20:25:49.947Z" },
+    { url = "https://files.pythonhosted.org/packages/c4/e6/5686c50bb4bcc73fe823863a1b1fdbccdf9316b235aa9c1c84b9be0d2bae/flet_secure_storage-1.1.3-py3-none-any.whl", hash = "sha256:caf181c123e4b327f70631ebf3dff74b4ffe9766154d65654fe8a6a262c9c331", size = 16703, upload-time = "2026-11-22T22:51:32.858Z" },
 ]
 
 [[package]]
