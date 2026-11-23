@@ -40,10 +40,15 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - { name: windows, os: windows-latest, command: windows }
-          - { name: linux, os: ubuntu-latest, command: linux }
-          - { name: macos, os: macos-latest, command: macos }
-          - { name: android, os: ubuntu-latest, command: apk }
+          - { name: windows, os: windows-latest, command: windows, args: "" }
+          - { name: linux, os: ubuntu-latest, command: linux, args: "" }
+          - {
+              name: macos,
+              os: macos-latest,
+              command: macos,
+              args: "--arch arm64",
+            }
+          - { name: android, os: ubuntu-latest, command: apk, args: "" }
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
@@ -80,7 +85,7 @@ jobs:
 
       - name: Build
         shell: bash
-        run: uv run --no-dev --with flet flet build ${{ matrix.command }} --yes -v
+        run: uv run --no-dev --with flet flet build ${{ matrix.command }} ${{ matrix.args }} --yes -v
         env:
           PYTHONIOENCODING: utf-8
           FLET_ANDROID_SIGNING_KEY_STORE: ${{ runner.temp }}/release.jks
