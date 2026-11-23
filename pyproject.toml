@@ -31,10 +31,10 @@ dependencies = [
   "numpy>=2.5.3",
   "platformdirs>=4.12.1",
   "pydantic-settings>=2.15.0",
-  # Desktop-only (no mobile wheels): skipped on Android/iOS builds
-  "chromadb>=1.5.9; sys_platform != 'android'",
-  "asyncpg>=0.31.0; sys_platform != 'android'",
 ]
+
+[project.optional-dependencies]
+desktop = ["chromadb>=1.5.9", "asyncpg>=0.31.0"]
 
 [project.scripts]
 codex-query = "codex_query.presentation.cli:main"
