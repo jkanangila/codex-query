@@ -15,7 +15,6 @@ dependencies = [
   # Database & ORM
   "aiosqlite>=0.22.1",
   "alembic>=1.20.0",
-  "asyncpg>=0.31.0",
   "sqlalchemy[asyncio]>=2.0.54",
   "sqlmodel>=0.0.47",
   # Document & EPUB Parsing
@@ -24,6 +23,7 @@ dependencies = [
   # Interface & UI
   "click>=8.1",
   "flet>=0.80",
+  "flet-secure-storage>=1.0.1",
   "questionary>=2.1",
   "rich>=14.0",
   # Core Utilities, Networking & Security
@@ -31,12 +31,10 @@ dependencies = [
   "numpy>=2.5.3",
   "platformdirs>=4.12.1",
   "pydantic-settings>=2.15.0",
-  "flet-secure-storage>=1.0.1",
-  "chromadb>=1.5.9",
+  # Desktop-only (no mobile wheels): skipped on Android/iOS builds
+  "chromadb>=1.5.9; sys_platform != 'android'",
+  "asyncpg>=0.31.0; sys_platform != 'android'",
 ]
-
-[project.optional-dependencies]
-desktop = ["chromadb>=1.0"]
 
 [project.scripts]
 codex-query = "codex_query.presentation.cli:main"
@@ -81,7 +79,14 @@ module-root = "src"
 org = "dev.codex_query"
 company = "Kanangila"
 product = "Offline EPUB RAG"
-app.path = "src/codex_query/presentation/ui"
+copyright = "Copyright (c) 2026 Kanangila"
+
+[tool.flet.app]
+path = "src"    # bundle the whole package so absolute imports work
+module = "main" # src/main.py
+
+[tool.flet.android]
+split_per_abi = true # smaller per-architecture APKs
 
 [tool.ruff]
 line-length = 88

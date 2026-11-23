@@ -6,7 +6,6 @@ from pathlib import Path
 from platformdirs import user_cache_dir, user_data_dir
 
 
-# TODO: wire into logger and databases
 class AppPaths:
     """Provides path resolution using Flet environment variables with fallbacks."""
 
