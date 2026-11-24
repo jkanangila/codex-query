@@ -54,16 +54,17 @@ dev = [
   "pytest>=8.4",
   "pytest-asyncio>=1.4.0",
   "pytest-cov>=6.2",
-
   # Linting & Type Checking
   "basedpyright>=1.31",
   "ruff>=0.13",
-
   # Interactive Development
   "ipykernel>=7.3.0",
   "jupyter-client>=8.10.0",
   "jupytext>=1.19.5",
   "pynvim>=0.6.0",
+  "commitizen>=4.20.1",
+  "pre-commit>=4.7.0",
+  "pyinstaller>=6.22.3",
 ]
 
 # ------------------------------------------------------------------------------
