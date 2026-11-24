@@ -12,12 +12,13 @@ import contextlib
 from typing import Any
 
 import flet as ft
-from dotenv import find_dotenv, load_dotenv
+from dotenv import load_dotenv
 
 from codex_query.di.bootstrap import CompositionRoot
 from codex_query.infrastructure.database.sqlmodel.config import db_config
 from codex_query.infrastructure.logging.config import asyncio_handler
 from codex_query.infrastructure.logging.factory import create_logger
+from codex_query.infrastructure.paths import AppPaths
 from codex_query.presentation.ui.app import CodexApp
 from codex_query.presentation.ui.theme import configure_page
 from codex_query.presentation.ui.utils.set_page_alignment import (
@@ -118,7 +119,10 @@ def main() -> None:
 
     Loads environment variables from `.dotenv` and starts the Flet event loop.
     """
-    load_dotenv(find_dotenv())
+    env_file = AppPaths.app_storage_data_dir() / ".env"
+    if env_file.is_file():
+        load_dotenv(env_file)
+
     logger.info("Launching Flet application...")
     ft.run(_main)
 
