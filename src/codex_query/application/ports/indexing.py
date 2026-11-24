@@ -11,19 +11,103 @@ from codex_query.domain.value_objects import QueueIndexJobRequest
 
 
 class IndexingJobPort(Protocol):
-    async def add(self, job: IndexingJob) -> IndexingJob: ...
-    async def save(self, job: IndexingJob) -> None: ...
+    """Persistence contract for indexing job state and queue management."""
+
+    async def add(self, job: IndexingJob) -> IndexingJob:
+        """Persist a new indexing job.
+
+        Args:
+            job: Domain indexing job to store.
+
+        Returns:
+            Persisted domain indexing job with storage-assigned fields populated.
+        """
+        ...
+
+    async def save(self, job: IndexingJob) -> None:
+        """Persist state changes for an existing indexing job.
+
+        Args:
+            job: Domain indexing job with updated fields.
+
+        Raises:
+            JobNotFoundError: If no matching job exists in storage.
+        """
+        ...
+
     async def update_progress(
         self, job_id: int, *, stage: Stage, done: int, total: int, checkpoint: int
-    ) -> None: ...
-    async def get(self, job_id: UUID) -> IndexingJob | None: ...
-    async def get_next_queued(self) -> IndexingJob | None: ...
-    async def list_for_book(self, book_id: int) -> Sequence[IndexingJob]: ...
-    async def list_active(
-        self,
-    ) -> list[IndexingJob]: ...  # everything not completed or cancelled
-    async def reset_running_to_queued(self) -> int: ...
-    async def delete(self, job_id: UUID) -> bool: ...
+    ) -> None:
+        """Update progress metrics for a running job.
+
+        Args:
+            job_id: Identifier of the target job.
+            stage: Current execution stage.
+            done: Completed item count in the current stage.
+            total: Total expected item count in the current stage.
+            checkpoint: Persistent progress offset or checkpoint value.
+
+        Raises:
+            JobNotFoundError: If the job is missing or not currently running.
+        """
+        ...
+
+    async def get(self, job_id: UUID) -> IndexingJob | None:
+        """Fetch an indexing job by its unique identifier.
+
+        Args:
+            job_id: Unique identifier of the target job.
+
+        Returns:
+            Matching indexing job when found, otherwise `None`.
+        """
+        ...
+
+    async def get_next_queued(self) -> IndexingJob | None:
+        """Fetch the next queued indexing job eligible for execution.
+
+        Returns:
+            Next queued indexing job, or `None` if no jobs are queued.
+        """
+        ...
+
+    async def list_for_book(self, book_id: int) -> Sequence[IndexingJob]:
+        """Fetch all indexing jobs associated with a book.
+
+        Args:
+            book_id: Identifier of the target book.
+
+        Returns:
+            Indexing jobs belonging to the book.
+        """
+        ...
+
+    async def list_active(self) -> list[IndexingJob]:
+        """Fetch all active indexing jobs outside terminal states.
+
+        Returns:
+            Jobs that are neither completed nor cancelled.
+        """
+        ...
+
+    async def reset_running_to_queued(self) -> int:
+        """Reset interrupted running jobs back to queued state.
+
+        Returns:
+            Number of jobs transitioned from running to queued.
+        """
+        ...
+
+    async def delete(self, job_id: UUID) -> bool:
+        """Delete an indexing job by its unique identifier.
+
+        Args:
+            job_id: Unique identifier of the job to delete.
+
+        Returns:
+            `True` if a matching job was deleted, `False` otherwise.
+        """
+        ...
 
 
 class SettingsRepositoryPort(Protocol):

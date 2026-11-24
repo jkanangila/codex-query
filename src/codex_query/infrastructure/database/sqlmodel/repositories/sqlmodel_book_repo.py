@@ -1,3 +1,5 @@
+"""SQLModel persistence implementation for books and book metadata."""
+
 from dataclasses import fields
 from pathlib import Path
 from typing import Any, override
@@ -15,8 +17,8 @@ from codex_query.domain.models.document import (
     DocumentType,
 )
 from codex_query.domain.models.document import Book as DomainBook
-from codex_query.infrastructure.logging.factory import create_logger
 from codex_query.infrastructure.database.sqlmodel.models import Book
+from codex_query.infrastructure.logging.factory import create_logger
 
 logger = create_logger(__name__)
 
@@ -24,16 +26,15 @@ logger = create_logger(__name__)
 class SqlModelBookRepository(IBookRepository):
     """SQLModel-backed repository for book persistence.
 
-    Perform session flushes to update the persistence context without
-    committing transactions.
-    Transaction management and final commits are handled by the UnitOfWork.
+    Flushes session changes to update the persistence context without committing
+    transactions; transaction management and commits are handled by `UnitOfWork`.
     """
 
     def __init__(self, session: AsyncSession) -> None:
-        """Initialize repository with an active asynchronous SQLModel session.
+        """Initialize the repository with an asynchronous SQLModel session.
 
         Args:
-            session: Active AsyncSession bound to the current unit of work.
+            session: Active session bound to the current unit of work.
         """
         self._session = session
 
@@ -42,7 +43,7 @@ class SqlModelBookRepository(IBookRepository):
         """Fetch all books ordered by series presence, series name, and title.
 
         Returns:
-            list[DomainBook]: Ordered collection of all books mapped to domain models.
+            Books ordered with non-series titles first, then series and title.
         """
         logger.debug("Fetching all books ordered by series and title")
         stmt = select(Book).order_by(
@@ -58,10 +59,10 @@ class SqlModelBookRepository(IBookRepository):
         """Fetch a single book by its primary database ID.
 
         Args:
-            book_id: Unique database identifier of the book.
+            book_id: Primary key of the book.
 
         Returns:
-            DomainBook | None: Domain book instance if found, None otherwise.
+            Mapped domain book when found, otherwise `None`.
         """
         logger.debug("Querying book by ID: %d", book_id)
         book = await self._session.get(Book, book_id)
@@ -72,22 +73,44 @@ class SqlModelBookRepository(IBookRepository):
         return _to_domain(book)
 
     @override
-    async def register_book(self, book: DomainBook) -> int:
-        """Register a new domain book in database storage.
+    async def get_by_path(self, path: Path) -> DomainBook | None:
+        """Fetch a single book by its stored file path.
 
         Args:
-            book: Domain book model instance to register.
+            path: File system path associated with the book.
 
         Returns:
-            int: Generated database primary key for the new book.
+            First matching domain book when found, otherwise `None`.
+        """
+        logger.debug("Querying book by path: '%s'", path)
+        stmt = select(Book).where(col(Book.path) == str(path))
+        result = await self._session.exec(stmt)
+        book = result.first()
+        if book is None:
+            logger.debug("No book found matching path: '%s'", path)
+            return None
+        logger.debug("Found book ID %d for path '%s'", book.id, path)
+        return _to_domain(book)
+
+    @override
+    async def register_book(self, book: DomainBook) -> int:
+        """Persist a new domain book and flush the session.
+
+        Args:
+            book: Domain book to insert; any existing `id` is cleared so the
+                database assigns a new primary key.
+
+        Returns:
+            Generated database primary key for the newly registered book.
 
         Raises:
             BookAlreadyExistsError: If a database integrity constraint (such as a
                 duplicate file path) is violated.
+            RuntimeError: If flushing does not populate a primary key.
         """
         logger.info("Registering new book at path '%s'", book.path)
         db_book = _from_domain(book)
-        db_book.id = None  # let the DB assign the PK
+        db_book.id = None
         self._session.add(db_book)
         try:
             await self._session.flush()
@@ -109,17 +132,18 @@ class SqlModelBookRepository(IBookRepository):
 
     @override
     async def update(self, book_id: int, payload: BookUpdate) -> bool | None:
-        """Apply the fields set on a payload to an existing book record.
+        """Apply non-`UNSET` fields from a payload to an existing book record.
 
-        Fields left as ``UNSET`` are untouched; ``None`` is a real value, so
-        nullable fields such as ``series`` can now be cleared.
+        Fields left as `UNSET` remain untouched; `None` is applied as an explicit
+        value so nullable fields such as `series` can be cleared.
 
         Args:
-            book_id: Database ID of the book to update.
-            payload: Partial update; only non-``UNSET`` fields are applied.
+            book_id: Primary key of the book to update.
+            payload: Partial update containing fields set to values other than `UNSET`.
 
         Returns:
-            bool | None: True if update succeeded, None if book was not found.
+            `True` if the book exists and was updated (or had no changes), or
+            `None` if no book with `book_id` was found.
         """
         logger.debug("Attempting to update book ID %d", book_id)
         db_book = await self._session.get(Book, book_id)
@@ -146,13 +170,13 @@ class SqlModelBookRepository(IBookRepository):
 
     @override
     async def delete(self, book_id: int) -> bool:
-        """Delete a book from storage by its database ID.
+        """Delete a book from storage by its primary database ID.
 
         Args:
-            book_id: Unique database identifier of the target book.
+            book_id: Primary key of the book to delete.
 
         Returns:
-            bool: True if the book was found and deleted, False otherwise.
+            `True` if the book was found and deleted, `False` otherwise.
         """
         logger.debug("Attempting to delete book ID %d", book_id)
         book = await self._session.get(Book, book_id)
@@ -171,10 +195,16 @@ class SqlModelBookRepository(IBookRepository):
 # Mapping                                                                     #
 # --------------------------------------------------------------------------- #
 def _changes(payload: BookUpdate) -> dict[str, Any]:
-    """ORM-ready column values for every field that is not ``UNSET``.
+    """Extract ORM-ready column values for every field that is not `UNSET`.
 
-    Uses ``fields()`` rather than ``asdict()`` so nested dataclasses are not
-    recursively converted and tuples are not silently copied.
+    Uses `dataclasses.fields()` rather than `dataclasses.asdict()` so nested
+    dataclasses are not recursively converted and tuples are not silently copied.
+
+    Args:
+        payload: Partial update payload to inspect.
+
+    Returns:
+        Dictionary of column names to converted values for non-`UNSET` fields.
     """
     changes: dict[str, Any] = {}
     for f in fields(payload):
@@ -194,7 +224,14 @@ def _changes(payload: BookUpdate) -> dict[str, Any]:
 
 
 def _meta_to_json(meta: BookMetadata) -> dict[str, Any]:
-    """Serialize metadata to JSON-safe primitives (no tuples, no enums)."""
+    """Serialize book metadata to JSON-compatible primitives.
+
+    Args:
+        meta: Domain metadata instance to serialize.
+
+    Returns:
+        Dictionary containing JSON-safe values without tuples or enum instances.
+    """
     return {
         "file_type": meta.file_type,
         "chapter_count": meta.chapter_count,
@@ -215,10 +252,22 @@ def _meta_to_json(meta: BookMetadata) -> dict[str, Any]:
 
 
 def _meta_from_json(raw: dict[str, Any]) -> BookMetadata:
-    """Rebuild metadata, restoring tuples/enums and tolerating missing keys."""
+    """Deserialize book metadata while tolerating missing or legacy fields.
+
+    Args:
+        raw: Raw dictionary loaded from persisted JSON metadata.
+
+    Returns:
+        Reconstructed `BookMetadata` instance with tuple and enum types restored.
+    """
+    raw_doc_type = raw.get("document_type")
     try:
-        document_type = DocumentType(raw.get("document_type"))
+        document_type = DocumentType(raw_doc_type)
     except ValueError:
+        logger.warning(
+            "Unknown document_type %r in metadata; defaulting to UNKNOWN",
+            raw_doc_type,
+        )
         document_type = DocumentType.UNKNOWN
 
     return BookMetadata(
@@ -241,8 +290,14 @@ def _meta_from_json(raw: dict[str, Any]) -> BookMetadata:
 
 
 def _from_domain(book: DomainBook) -> Book:
-    """Convert a domain Book instance into a SQLModel database record."""
-    logger.debug("Mapping domain Book to database model (title='%s')", book.title)
+    """Convert a domain `Book` instance into a SQLModel `Book` entity.
+
+    Args:
+        book: Source domain book model.
+
+    Returns:
+        SQLModel `Book` entity with serialized metadata and collection fields.
+    """
     return Book(
         id=book.id,
         series=book.series,
@@ -257,8 +312,14 @@ def _from_domain(book: DomainBook) -> Book:
 
 
 def _to_domain(book: Book) -> DomainBook:
-    """Convert a SQLModel database record into a domain Book instance."""
-    logger.debug("Mapping database model to domain Book (ID=%s)", book.id)
+    """Convert a SQLModel `Book` entity into a domain `Book` instance.
+
+    Args:
+        book: Source ORM book entity.
+
+    Returns:
+        Domain `Book` instance with deserialized metadata and path/tuple fields.
+    """
     return DomainBook(
         id=book.id,
         path=Path(book.path),

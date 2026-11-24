@@ -1,3 +1,5 @@
+"""SQLModel persistence implementation for chapter text chunks."""
+
 from collections.abc import Collection, Sequence
 from dataclasses import asdict, fields
 from typing import Any, override
@@ -26,15 +28,15 @@ logger = create_logger(__name__)
 class SqlModelChunkRepository(IChunkRepository):
     """SQLModel-backed text chunk repository.
 
-    Performs session flushes and executions only; transaction commits are managed
-    by the UnitOfWork.
+    Performs session flushes and statement executions only; transaction commits
+    are managed by the `UnitOfWork`.
     """
 
     def __init__(self, session: AsyncSession) -> None:
-        """Initialize repository with an active asynchronous SQLModel session.
+        """Initialize the repository with an asynchronous SQLModel session.
 
         Args:
-            session: Active AsyncSession bound to the current unit of work.
+            session: Active session bound to the current unit of work.
         """
         self._session = session
 
@@ -42,15 +44,15 @@ class SqlModelChunkRepository(IChunkRepository):
     async def get_all_for_book(
         self, book_id: int, after_id: int | None = None, limit: int = 100
     ) -> Sequence[DomainTextChunk]:
-        """Fetch text chunks associated with a book using keyset pagination on ID.
+        """Fetch text chunks for a book using keyset pagination on chunk ID.
 
         Args:
-            book_id: Database ID of the target book.
-            after_id: Optional ID cursor for fetching chunks ordered after this value.
-            limit: Maximum number of text chunks to retrieve.
+            book_id: Primary key of the target book.
+            after_id: Exclusive lower bound on chunk ID for pagination.
+            limit: Maximum number of text chunks to return.
 
         Returns:
-            Sequence[DomainTextChunk]: Sequence of mapped domain text chunk models.
+            Text chunks ordered by chunk ID.
         """
         logger.debug(
             "Fetching text chunks for book ID %d (after_id=%s, limit=%d)",
@@ -74,13 +76,13 @@ class SqlModelChunkRepository(IChunkRepository):
 
     @override
     async def get_ids_for_chapter(self, chapter_id: int) -> Sequence[int]:
-        """Fetch primary key IDs for all text chunks belonging to a chapter.
+        """Fetch primary key IDs for all text chunks in a chapter.
 
         Args:
-            chapter_id: Database ID of the target chapter.
+            chapter_id: Primary key of the target chapter.
 
         Returns:
-            Sequence[int]: Sequence of non-null chunk database primary keys.
+            Non-null chunk primary keys belonging to the chapter.
         """
         logger.debug("Fetching chunk IDs for chapter ID %d", chapter_id)
         stmt = select(col(TextChunk.id)).where(col(TextChunk.chapter_id) == chapter_id)
@@ -96,10 +98,10 @@ class SqlModelChunkRepository(IChunkRepository):
         """Fetch all text chunks for a chapter ordered by chunk index.
 
         Args:
-            chapter_id: Database ID of the target chapter.
+            chapter_id: Primary key of the target chapter.
 
         Returns:
-            Sequence[DomainTextChunk]: Sequence of mapped domain text chunks.
+            Domain text chunks ordered by `chunk_index`.
         """
         logger.debug("Fetching all text chunks for chapter ID %d", chapter_id)
         stmt = (
@@ -116,17 +118,18 @@ class SqlModelChunkRepository(IChunkRepository):
     async def upsert_for_chapter(
         self, chapter_id: int, chunks: Sequence[DomainTextChunk]
     ) -> Sequence[int]:
-        """Upsert text chunks on conflict of (chapter_id, chunk_index) in capped batches
+        """Upsert text chunks on `(chapter_id, chunk_index)` in capped batches.
 
-        Does NOT handle removal of extraneous trailing chunks if a chapter was
-        re-chunked into fewer pieces. Call `delete_for_chapter` first if needed.
+        Updates `text` and `meta` on conflict. Does not remove trailing chunks if
+        a chapter is re-chunked into fewer pieces; call `delete_for_chapter`
+        first when full replacement is required.
 
         Args:
-            chapter_id: Database ID of the parent chapter.
-            chunks: Sequence of domain text chunks to upsert.
+            chapter_id: Primary key of the parent chapter.
+            chunks: Domain text chunks to insert or update.
 
         Returns:
-            Sequence[int]: Database IDs corresponding to the input chunks in order.
+            Chunk primary keys aligned with the input `chunks` sequence.
         """
         if not chunks:
             logger.debug(
@@ -169,24 +172,23 @@ class SqlModelChunkRepository(IChunkRepository):
             len(chunks),
             chapter_id,
         )
-        # Assumes DomainTextChunk is a dataclass; use model_copy for pydantic.
         return [ids_by_index[c.chunk_index] for c in chunks]
 
     @override
     async def delete_for_chapter(self, chapter_id: int) -> int:
-        """Delete all text chunks associated with a specific chapter ID.
+        """Delete all text chunks belonging to a chapter.
 
         Args:
-            chapter_id: Database ID of the chapter whose chunks should be deleted.
+            chapter_id: Primary key of the chapter whose chunks are deleted.
 
         Returns:
-            int: Number of deleted chunk rows.
+            Number of deleted chunk rows.
         """
         logger.info("Deleting all text chunks for chapter ID %d", chapter_id)
         result = await self._session.exec(
             delete(TextChunk).where(col(TextChunk.chapter_id) == chapter_id)
         )
-        deleted_count = result.rowcount
+        deleted_count = result.rowcount or 0
         logger.info(
             "Deleted %d text chunk(s) for chapter ID %d", deleted_count, chapter_id
         )
@@ -196,46 +198,81 @@ class SqlModelChunkRepository(IChunkRepository):
     async def get_ids_for_orders(
         self, book_id: int, orders: Collection[int]
     ) -> Sequence[int]:
+        """Fetch chunk IDs for chapters matching the given order numbers in a book.
+
+        Args:
+            book_id: Primary key of the parent book.
+            orders: Collection of chapter order numbers to match.
+
+        Returns:
+            Matching non-null chunk primary keys across all queried batches.
+        """
         ordered = list(orders)
+        if not ordered:
+            logger.debug(
+                "No chapter orders provided for chunk ID lookup on book ID %d",
+                book_id,
+            )
+            return []
+
+        logger.debug(
+            "Fetching chunk IDs across %d chapter order(s) for book ID %d",
+            len(ordered),
+            book_id,
+        )
         ids: list[int] = []
         for i in range(0, len(ordered), _IN_BATCH):
+            batch_orders = ordered[i : i + _IN_BATCH]
             result = await self._session.exec(
                 select(col(TextChunk.id))
                 .join(Chapter, col(TextChunk.chapter_id) == col(Chapter.id))
                 .where(
                     col(Chapter.book_id) == book_id,
-                    col(Chapter.chapter_order).in_(ordered[i : i + _IN_BATCH]),
+                    col(Chapter.chapter_order).in_(batch_orders),
                 )
             )
             ids.extend(chunk_id for chunk_id in result.all() if chunk_id is not None)
+
+        logger.debug(
+            "Retrieved %d chunk ID(s) across %d chapter order(s) for book ID %d",
+            len(ids),
+            len(ordered),
+            book_id,
+        )
         return ids
 
     @override
     async def count_for_book(self, book_id: int) -> int:
+        """Count total text chunks associated with a book across all chapters.
+
+        Args:
+            book_id: Primary key of the target book.
+
+        Returns:
+            Total number of text chunks for the book.
+        """
+        logger.debug("Counting text chunks for book ID %d", book_id)
         statement = (
             select(func.count(col(TextChunk.id)))
             .join(Chapter, col(TextChunk.chapter_id) == Chapter.id)
             .where(Chapter.book_id == book_id)
         )
         result = await self._session.exec(statement)
-        return result.one()
+        count = result.one()
+        logger.debug("Found %d text chunk(s) for book ID %d", count, book_id)
+        return count
 
 
 def _to_row(chapter_id: int, chunk: DomainTextChunk) -> dict[str, Any]:
-    """Convert a domain text chunk into a raw dictionary for bulk insertion.
+    """Build a column dictionary for bulk text chunk insert or upsert statements.
 
     Args:
-        chapter_id: Database ID of the parent chapter.
-        chunk: Source domain text chunk instance.
+        chapter_id: Primary key of the parent chapter.
+        chunk: Source domain text chunk.
 
     Returns:
-        dict[str, Any]: Dictionary mapping DB column names to values.
+        Dictionary mapping database column names to serialized values.
     """
-    logger.debug(
-        "Mapping chunk index %d to row dict for chapter ID %d",
-        chunk.chunk_index,
-        chapter_id,
-    )
     return {
         "chapter_id": chapter_id,
         "chunk_index": chunk.chunk_index,
@@ -245,17 +282,17 @@ def _to_row(chapter_id: int, chunk: DomainTextChunk) -> dict[str, Any]:
 
 
 def _to_domain(chunk: TextChunk) -> DomainTextChunk:
-    """Convert a SQLModel TextChunk ORM entity into a DomainTextChunk instance.
+    """Convert a SQLModel `TextChunk` entity into a domain `TextChunk`.
 
-    Filters metadata key-value pairs against valid TextChunkMetadata fields.
+    Ignores unrecognized keys in `chunk.meta` when constructing
+    `TextChunkMetadata`.
 
     Args:
-        chunk: Source SQLModel database entity.
+        chunk: Source ORM text chunk entity.
 
     Returns:
-        DomainTextChunk: Mapped domain text chunk model.
+        Domain `TextChunk` populated with parsed metadata fields.
     """
-    logger.debug("Mapping TextChunk ORM entity ID %d to domain model", chunk.id)
     metadata = TextChunkMetadata(
         **{k: v for k, v in chunk.meta.items() if k in _META_FIELDS}
     )

@@ -1,3 +1,5 @@
+"""SQLModel persistence implementation for indexing jobs."""
+
 from collections.abc import Sequence
 from typing import override
 from uuid import UUID
@@ -14,38 +16,38 @@ from codex_query.domain.models.job import (
     JobStatus,
     Stage,
 )
-from codex_query.infrastructure.logging.factory import create_logger
 from codex_query.infrastructure.database.sqlmodel.models import (
     IndexingJob as IndexingJobRecord,
 )
+from codex_query.infrastructure.logging.factory import create_logger
 
 logger = create_logger(__name__)
 
 
 class SqlModelIndexingJobRepository(IndexingJobPort):
-    """SQLModel-backed repository for managing indexing job lifecycle states.
+    """SQLModel-backed repository for indexing job lifecycle state.
 
-    Performs session flushes and executions only; transaction commits are managed
-    by the UnitOfWork.
+    Performs session flushes and statement executions only; transaction commits
+    are managed by the `UnitOfWork`.
     """
 
     def __init__(self, session: AsyncSession) -> None:
-        """Initialize repository with an active asynchronous SQLModel session.
+        """Initialize the repository with an asynchronous SQLModel session.
 
         Args:
-            session: Active AsyncSession bound to the current unit of work.
+            session: Active session bound to the current unit of work.
         """
         self._session = session
 
     @override
     async def add(self, job: IndexingJob) -> IndexingJob:
-        """Persist a new indexing job entity to storage.
+        """Persist a new indexing job and flush the session.
 
         Args:
-            job: New domain IndexingJob model to persist.
+            job: Domain indexing job to insert.
 
         Returns:
-            IndexingJob: Domain job instance with populated database primary key.
+            Persisted domain indexing job with database-assigned fields populated.
         """
         logger.info(
             "Creating new indexing job for book ID %d (status=%s, stage=%s)",
@@ -58,7 +60,7 @@ class SqlModelIndexingJobRepository(IndexingJobPort):
         await self._session.flush()
 
         logger.info(
-            "Successfully created indexing job ID %d for book ID %d",
+            "Successfully created indexing job ID %s for book ID %d",
             record.id,
             job.book_id,
         )
@@ -66,29 +68,29 @@ class SqlModelIndexingJobRepository(IndexingJobPort):
 
     @override
     async def save(self, job: IndexingJob) -> None:
-        """Update an existing indexing job record in storage.
+        """Update an existing indexing job record and flush the session.
 
         Args:
-            job: Domain IndexingJob model with updated fields.
+            job: Domain indexing job containing updated state fields.
 
         Raises:
             JobNotFoundError: If no matching job record exists in storage.
         """
         logger.debug(
-            "Updating indexing job ID %d (status=%s, stage=%s)",
+            "Updating indexing job ID %s (status=%s, stage=%s)",
             job.id,
             job.status.value,
             job.stage.value,
         )
         record = await self._session.get(IndexingJobRecord, job.id)
         if record is None:
-            logger.warning("Failed to save job ID %d: record not found", job.id)
+            logger.warning("Failed to save job ID %s: record not found", job.id)
             raise JobNotFoundError(job.id)
 
         _apply(record, job)
         await self._session.flush()
         logger.info(
-            "Successfully updated indexing job ID %d (status=%s)",
+            "Successfully updated indexing job ID %s (status=%s)",
             job.id,
             job.status.value,
         )
@@ -97,20 +99,21 @@ class SqlModelIndexingJobRepository(IndexingJobPort):
     async def update_progress(
         self, job_id: int, *, stage: Stage, done: int, total: int, checkpoint: int
     ) -> None:
-        """Update progress-specific attributes for a currently running job.
+        """Update progress fields for a currently running job.
 
-        Atomic field update targeting only progress columns prevents race conditions
-        from overwriting concurrent job cancellation requests.
+        Targets only progress columns so concurrent cancellation requests are not
+        overwritten.
 
         Args:
-            job_id: Primary key ID of the target job.
+            job_id: Identifier of the target job.
             stage: Current execution stage.
-            done: Items completed in current stage.
-            total: Total items expected in current stage.
-            checkpoint: Persistent offset/checkpoint indicator.
+            done: Completed item count in the current stage.
+            total: Total expected item count in the current stage.
+            checkpoint: Persistent progress offset or checkpoint value.
 
         Raises:
-            JobNotFoundError: If the job is missing or no longer in RUNNING status.
+            JobNotFoundError: If the job does not exist or is not in `RUNNING`
+                status.
         """
         logger.debug(
             "Updating progress for running job ID %d "
@@ -141,29 +144,29 @@ class SqlModelIndexingJobRepository(IndexingJobPort):
 
     @override
     async def get(self, job_id: UUID) -> IndexingJob | None:
-        """Fetch an indexing job by its database primary key.
+        """Fetch an indexing job by its identifier.
 
         Args:
-            job_id: Database ID of the target job.
+            job_id: Unique identifier of the target job.
 
         Returns:
-            IndexingJob | None: Mapped domain indexing job if found, None otherwise.
+            Mapped domain indexing job when found, otherwise `None`.
         """
-        logger.debug("Querying indexing job by ID: %d", job_id)
+        logger.debug("Querying indexing job by ID: %s", job_id)
         record = await self._session.get(IndexingJobRecord, job_id)
         if record is None:
-            logger.debug("No indexing job found matching ID: %d", job_id)
+            logger.debug("No indexing job found matching ID: %s", job_id)
             return None
-        logger.debug("Retrieved indexing job ID %d (status=%s)", job_id, record.status)
+        logger.debug("Retrieved indexing job ID %s (status=%s)", job_id, record.status)
         return _to_domain(record)
 
     @override
     async def get_next_queued(self) -> IndexingJob | None:
-        """Retrieve the oldest queued indexing job ready for execution.
+        """Fetch the oldest queued indexing job ready for execution.
 
         Returns:
-            IndexingJob | None: Oldest queued domain job model,
-                or None if queue is empty.
+            Earliest queued domain indexing job by ID, or `None` if none are
+            queued.
         """
         logger.debug("Querying for next queued indexing job")
         stmt = (
@@ -177,15 +180,15 @@ class SqlModelIndexingJobRepository(IndexingJobPort):
         if record is None:
             logger.debug("No queued indexing jobs found")
             return None
-        logger.info("Found next queued indexing job ID %d", record.id)
+        logger.info("Found next queued indexing job ID %s", record.id)
         return _to_domain(record)
 
     @override
     async def list_active(self) -> list[IndexingJob]:
-        """Fetch all non-terminal active indexing jobs.
+        """Fetch all non-terminal active indexing jobs ordered by ID.
 
         Returns:
-            list[IndexingJob]: List of active non-terminal domain job instances.
+            Active indexing jobs whose status is outside `TERMINAL_STATUSES`.
         """
         logger.debug("Fetching all active non-terminal indexing jobs")
         stmt = (
@@ -200,13 +203,13 @@ class SqlModelIndexingJobRepository(IndexingJobPort):
 
     @override
     async def list_for_book(self, book_id: int) -> Sequence[IndexingJob]:
-        """Fetch all indexing jobs associated with a specific book ID.
+        """Fetch all indexing jobs for a book ordered by ID.
 
         Args:
-            book_id: Database ID of the target book.
+            book_id: Primary key of the target book.
 
         Returns:
-            Sequence[IndexingJob]: Sequence of domain indexing job models.
+            Indexing jobs associated with `book_id`.
         """
         logger.debug("Fetching indexing jobs for book ID %d", book_id)
         stmt = (
@@ -221,12 +224,12 @@ class SqlModelIndexingJobRepository(IndexingJobPort):
 
     @override
     async def reset_running_to_queued(self) -> int:
-        """Reset interrupted RUNNING jobs to QUEUED status during startup initialization
+        """Reset interrupted `RUNNING` jobs to `QUEUED` during startup recovery.
 
-        Allows jobs interrupted by sudden process crash or shutdown to resume execution.
+        Allows jobs interrupted by a sudden process stop or crash to resume.
 
         Returns:
-            int: Total number of interrupted jobs successfully reset to QUEUED.
+            Number of jobs updated from `RUNNING` to `QUEUED`.
         """
         logger.info("Resetting orphaned RUNNING jobs to QUEUED status")
         result = await self._session.exec(
@@ -234,7 +237,7 @@ class SqlModelIndexingJobRepository(IndexingJobPort):
             .where(col(IndexingJobRecord.status) == JobStatus.RUNNING)
             .values(status=JobStatus.QUEUED)
         )
-        reset_count = result.rowcount
+        reset_count = result.rowcount or 0
         if reset_count > 0:
             logger.info("Successfully reset %d RUNNING job(s) to QUEUED", reset_count)
         else:
@@ -243,36 +246,35 @@ class SqlModelIndexingJobRepository(IndexingJobPort):
 
     @override
     async def delete(self, job_id: UUID) -> bool:
-        """Delete an indexing job record from storage by its primary key ID.
+        """Delete an indexing job record by its identifier.
 
         Args:
-            job_id: Database ID of the job to delete.
+            job_id: Unique identifier of the job to delete.
 
         Returns:
-            bool: True if the record was found and deleted, False otherwise.
+            `True` if a matching job record was deleted, `False` otherwise.
         """
-        logger.info("Attempting to delete indexing job ID %d", job_id)
+        logger.info("Attempting to delete indexing job ID %s", job_id)
         result = await self._session.exec(
             delete(IndexingJobRecord).where(col(IndexingJobRecord.id) == job_id)
         )
-        deleted = result.rowcount > 0
+        deleted = (result.rowcount or 0) > 0
         if deleted:
-            logger.info("Successfully deleted indexing job ID %d", job_id)
+            logger.info("Successfully deleted indexing job ID %s", job_id)
         else:
-            logger.warning("Cannot delete indexing job ID %d: record not found", job_id)
+            logger.warning("Cannot delete indexing job ID %s: record not found", job_id)
         return deleted
 
 
 def _to_record(job: IndexingJob) -> IndexingJobRecord:
-    """Map a domain IndexingJob entity to an ORM database record.
+    """Convert a domain `IndexingJob` into a SQLModel `IndexingJobRecord`.
 
     Args:
-        job: Source domain IndexingJob entity.
+        job: Source domain indexing job.
 
     Returns:
-        IndexingJobRecord: SQLModel database ORM entity.
+        SQLModel `IndexingJobRecord` populated with current domain fields.
     """
-    logger.debug("Mapping domain IndexingJob to ORM record")
     return IndexingJobRecord(
         id=job.id,
         book_id=job.book_id,
@@ -288,15 +290,14 @@ def _to_record(job: IndexingJob) -> IndexingJobRecord:
 
 
 def _apply(record: IndexingJobRecord, job: IndexingJob) -> None:
-    """Apply updated domain job fields onto an existing ORM database record.
+    """Copy mutable domain job fields onto an existing ORM record.
 
-    Note that `book_id` is deliberately omitted because a job cannot change books.
+    Leaves `book_id` unchanged because a job cannot move to another book.
 
     Args:
-        record: Target SQLModel ORM record to mutate.
-        job: Source domain IndexingJob entity providing updated values.
+        record: Existing ORM record mutated in place.
+        job: Source domain indexing job providing updated values.
     """
-    logger.debug("Applying updated fields to ORM record for job ID %d", record.id)
     record.status = job.status
     record.stage = job.stage
     record.done = job.done
@@ -307,15 +308,14 @@ def _apply(record: IndexingJobRecord, job: IndexingJob) -> None:
 
 
 def _to_domain(record: IndexingJobRecord) -> IndexingJob:
-    """Map an ORM database record into a domain IndexingJob entity.
+    """Convert a SQLModel `IndexingJobRecord` into a domain `IndexingJob`.
 
     Args:
-        record: Source SQLModel ORM record.
+        record: Source ORM indexing job record.
 
     Returns:
-        IndexingJob: Mapped domain IndexingJob model.
+        Domain `IndexingJob` populated from the ORM record.
     """
-    logger.debug("Mapping ORM record ID %d to domain IndexingJob", record.id)
     return IndexingJob(
         id=record.id,
         book_id=record.book_id,

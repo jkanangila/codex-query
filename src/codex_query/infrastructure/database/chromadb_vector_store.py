@@ -22,10 +22,10 @@ from codex_query.application.ports.vector_store import VectorStorePort
 from codex_query.domain.errors import EmbeddingMismatchError
 from codex_query.domain.models.chat import SearchHit
 from codex_query.domain.models.document import TextChunk as DomainTextChunk
-from codex_query.infrastructure.logging.factory import create_logger
 from codex_query.infrastructure.database.sqlmodel.repositories.sqlmodel_hits import (
     load_hits,
 )
+from codex_query.infrastructure.logging.factory import create_logger
 
 logger = create_logger(__name__)
 

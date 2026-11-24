@@ -7,10 +7,10 @@ from pathlib import Path
 from sqlmodel.ext.asyncio.session import AsyncSession
 
 from codex_query.application.ports.vector_store import VectorStorePort
-from codex_query.infrastructure.paths import AppPaths
 from codex_query.infrastructure.database.sqlmodel.repositories import (
     sqlmodel_vector_store,
 )
+from codex_query.infrastructure.paths import AppPaths
 
 
 class VectorBackend(StrEnum):

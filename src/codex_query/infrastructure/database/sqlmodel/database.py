@@ -8,13 +8,13 @@ from sqlalchemy.orm import configure_mappers
 from sqlalchemy.pool import ConnectionPoolEntry
 from sqlmodel.ext.asyncio.session import AsyncSession
 
-from codex_query.infrastructure.logging.factory import create_logger
 from codex_query.infrastructure.database.sqlmodel.config import (
     DatabaseConfig,
 )
 from codex_query.infrastructure.database.sqlmodel.migrate import (
     run_migrations,
 )
+from codex_query.infrastructure.logging.factory import create_logger
 
 logger = create_logger(__name__)
 
