@@ -1,4 +1,8 @@
-"""Coordinates startup and orderly shutdown of the Flet application."""
+"""Coordinates startup and orderly shutdown of the Flet application.
+
+Manages lifecycle state transitions across the composition root and the UI
+application ViewModel so concurrent start and shutdown calls serialize safely.
+"""
 
 from __future__ import annotations
 
@@ -15,9 +19,9 @@ logger = create_logger(__name__)
 class ApplicationLifecycle:
     """Owns the UI application's CompositionRoot and AppViewModel lifecycle.
 
-    Startup and shutdown are serialized by one lock. A shutdown request received
-    while startup is in progress waits for startup to finish, then disposes the
-    resources exactly once.
+    Startup and shutdown are serialized by an internal lock. A shutdown request
+    received while startup is in progress waits for startup to finish, then
+    disposes resources once and transitions state to `STOPPED`.
     """
 
     def __init__(
@@ -26,6 +30,17 @@ class ApplicationLifecycle:
         *,
         shutdown_timeout: float = 5.0,
     ) -> None:
+        """Initialize the lifecycle coordinator.
+
+        Args:
+            composition: Dependency composition root managing background jobs,
+                events, and infrastructure resources.
+            shutdown_timeout: Maximum time in seconds to wait for running
+                background jobs to cancel during shutdown.
+
+        Raises:
+            ValueError: If `shutdown_timeout` is less than or equal to zero.
+        """
         if shutdown_timeout <= 0:
             raise ValueError("shutdown_timeout must be greater than zero")
 
@@ -36,7 +51,20 @@ class ApplicationLifecycle:
         self._lock = asyncio.Lock()
 
     async def start(self) -> AppViewModel:
-        """Start infrastructure and create the initialized application ViewModel."""
+        """Start infrastructure and create the initialized application ViewModel.
+
+        Transitions from `NEW` through `STARTING` to `RUNNING`. If startup raises,
+        attempts best-effort shutdown before re-raising the exception.
+
+        Returns:
+            The initialized `AppViewModel` instance.
+
+        Raises:
+            RuntimeError: If called from a state other than `NEW` or `RUNNING`,
+                or if `RUNNING` state lacks a `ViewModel`.
+            BaseException: Propagates any exception raised while starting
+                composition resources or creating the ViewModel.
+        """
         async with self._lock:
             if self.state is ApplicationState.RUNNING:
                 if self.view_model is None:
@@ -63,12 +91,21 @@ class ApplicationLifecycle:
                 raise
 
     async def shutdown(self) -> None:
-        """Stop jobs and dispose application resources; safe to call repeatedly."""
+        """Stop jobs and dispose application resources; safe to call repeatedly.
+
+        Acquires the lifecycle lock so shutdown waits for any in-flight
+        `start()` operation to complete before tearing down resources.
+        """
         async with self._lock:
             await self._shutdown_unlocked()
 
     async def _shutdown_unlocked(self) -> None:
-        """Perform shutdown while the lifecycle lock is held."""
+        """Perform shutdown steps while holding the lifecycle lock.
+
+        Disposes the ViewModel, clears job event subscriptions, attempts timed
+        cancellation of running background jobs, and closes infrastructure
+        resources before marking the state as `STOPPED`.
+        """
         if self.state is ApplicationState.STOPPED:
             return
 

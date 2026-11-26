@@ -1,4 +1,8 @@
-"""Flet application entry point and page lifecycle wiring."""
+"""Flet application entry point and page lifecycle wiring.
+
+Initializes environment configuration, logging, dependency injection, and the
+Flet page lifecycle so startup and shutdown events coordinate cleanly.
+"""
 
 from __future__ import annotations
 
@@ -29,7 +33,19 @@ logger = create_logger(__name__)
 
 
 async def _main(page: ft.Page) -> None:
-    """Configure the Flet page and run the application lifecycle."""
+    """Configure the Flet page, initialize resources, and run the UI shell.
+
+    Mounts a splash screen while starting the application lifecycle, transitions
+    to `CodexApp` once running, and coordinates idempotent shutdown across page
+    close, window close, and startup failure paths.
+
+    Args:
+        page: Active Flet page instance managed by the Flet runtime.
+
+    Raises:
+        BaseException: Re-raises any exception raised during startup or UI
+            initialization after attempting graceful shutdown.
+    """
     configure_page(page)
     page.window.prevent_close = True
 
@@ -44,7 +60,9 @@ async def _main(page: ft.Page) -> None:
     shutdown_task: asyncio.Task[None] | None = None
 
     async def perform_shutdown() -> None:
-        """Dispose the page shell and application resources."""
+        """
+        Dispose the UI shell, shut down lifecycle resources, and restore loophooks.
+        """
         logger.info("Flet page shutdown requested.")
 
         if shell is not None:
@@ -61,20 +79,26 @@ async def _main(page: ft.Page) -> None:
                 loop.set_exception_handler(previous_exception_handler)
 
     async def shutdown() -> None:
-        """Share one shutdown operation between all Flet close callbacks."""
+        """Execute and await a shared shutdown task across close callbacks."""
         nonlocal shutdown_task
         if shutdown_task is None:
             shutdown_task = asyncio.create_task(perform_shutdown())
         await asyncio.shield(shutdown_task)
 
     async def on_page_close() -> None:
-        """Handle Flet's page-close notification."""
+        """Run shared application shutdown when Flet closes the page."""
         await shutdown()
 
     window_destroy_requested = False
 
-    async def on_window_event(e: ft.WindowEvent[Any]) -> None:
-        """Intercept native window-close events for graceful shutdown."""
+    async def on_window_event(
+        e: ft.WindowEvent[Any],
+    ) -> None:
+        """Intercept native close events to run shutdown before destroying the window.
+
+        Args:
+            e: Window lifecycle event emitted by Flet.
+        """
         nonlocal window_destroy_requested
         if e.type is not ft.WindowEventType.CLOSE or window_destroy_requested:
             return
@@ -113,7 +137,12 @@ async def _main(page: ft.Page) -> None:
 
 
 def main() -> None:
-    """Load application configuration and start the Flet event loop."""
+    """Load environment configuration, set up logging, and start Flet.
+
+    Reads `.env` from the application storage directory if present without
+    overriding pre-existing environment variables, configures logging, and
+    starts the Flet runtime with `_main`.
+    """
     env_file = AppPaths.app_storage_data_dir() / ".env"
     if env_file.is_file():
         # Existing process environment variables intentionally take precedence.
