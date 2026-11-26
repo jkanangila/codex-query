@@ -147,15 +147,26 @@ class CodexApp:
         }
 
         # ── Subscriptions ─────────────────────────────────────────────────────
-        vm.subscribe(self._show_tab)
-        vm.events.toast.subscribe(self._toast)
-        vm.events.source_requested.subscribe(self._show_source)
-        vm.events.embedding_reindex_requested.subscribe(self._show_embedding_dialog)
+        self._unsubscribe = [
+            vm.subscribe(self._show_tab),
+            vm.events.toast.subscribe(self._toast),
+            vm.events.source_requested.subscribe(self._show_source),
+            vm.events.embedding_reindex_requested.subscribe(
+                self._show_embedding_dialog
+            ),
+        ]
 
         # ──────────────────────────────────────────────────────────────────────
         page.on_resize = self._on_resize
         self._build_layout()
         self._logger.info("CodexApp shell layout successfully built.")
+
+    def dispose(self) -> None:
+        """Detach page and ViewModel callbacks owned by this shell."""
+        for unsubscribe in self._unsubscribe:
+            unsubscribe()
+        self._unsubscribe.clear()
+        self.page.on_resize = None
 
     # ── Layout ────────────────────────────────────────────────────────────
     def _current_layout(self) -> _Layout:

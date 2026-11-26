@@ -7,6 +7,8 @@ managing application-wide state and event subscriptions.
 
 from __future__ import annotations
 
+from typing import override
+
 from codex_query.di.bootstrap import CompositionRoot
 from codex_query.domain.models.job import IndexingJob
 from codex_query.presentation.ui.viewmodels.chat_viewmodel import ChatViewModel
@@ -51,6 +53,7 @@ class AppViewModel(ObservableObject):
         self.composition = composition
         self.events = UiEvents()
         self._tab = Tab.LIBRARY
+        self._disposed = False
 
         self._logger.info("Initializing AppViewModel sub-view models...")
         self.library = LibraryViewModel(
@@ -93,18 +96,47 @@ class AppViewModel(ObservableObject):
             An initialized instance of AppViewModel.
         """
         vm = cls(composition)
-        vm._logger.info("Restoring indexing jobs and loading books from database...")
+        try:
+            vm._logger.info(
+                "Restoring indexing jobs and loading books from database..."
+            )
 
-        # Restore and display interrupted indexing jobs from persistence.
-        await vm.indexing.restore()
-        books = await vm.composition.use_cases.library.list_books()
+            # Restore and display interrupted indexing jobs from persistence.
+            await vm.indexing.restore()
+            books = list(await vm.composition.use_cases.library.list_books())
 
-        vm.library.set_books(list(books))
-        vm._logger.info(
-            f"AppViewModel successfully created with {len(list(books))} books."
-        )
+            vm.library.set_books(books)
+            vm._logger.info(
+                "AppViewModel successfully created with %d books.", len(books)
+            )
+            return vm
+        except BaseException:
+            # The constructor has already registered event subscriptions. Release
+            # them if asynchronous initialization fails before returning the VM.
+            vm.dispose()
+            raise
 
-        return vm
+    @override
+    def dispose(self) -> None:
+        """Release subscriptions owned by the application ViewModel.
+
+        The method is deliberately idempotent because both page-close and
+        window-close callbacks may request application shutdown.
+        """
+        if self._disposed:
+            return
+
+        self._disposed = True
+        self.library.dispose()
+        self.chat.dispose()
+        self.indexing.dispose()
+        self.settings.dispose()
+        self.events.toast.clear()
+        self.events.source_requested.clear()
+        self.events.embedding_reindex_requested.clear()
+        self.events.tab_navigation_requested.clear()
+        super().dispose()
+        self._logger.debug("Disposed AppViewModel subscriptions.")
 
     @property
     def tab(self) -> Tab:

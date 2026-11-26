@@ -3,6 +3,7 @@
 import re
 from collections.abc import Sequence
 from pathlib import Path
+from typing import override
 from uuid import UUID, uuid4
 
 from codex_query.application.events.async_signal import AsyncSignal
@@ -102,10 +103,29 @@ class IndexingViewModel(ObservableObject):
 
         # ── subscriptions and events ──────────────────────────────────────────
         self.job_completed: AsyncSignal[IndexingJob] = AsyncSignal()
-        job_events.on_job_update.subscribe(self._on_job_updated)
-        job_events.on_job_done.subscribe(self._on_job_done)
+        self._unsubscribe_job_update = job_events.on_job_update.subscribe(
+            self._on_job_updated
+        )
+        self._unsubscribe_job_done = job_events.on_job_done.subscribe(self._on_job_done)
+        self._disposed = False
 
         self._logger.info("Initialized IndexingViewModel")
+
+    @override
+    def dispose(self) -> None:
+        """Release subscriptions owned by this ViewModel.
+
+        Calling this method more than once is safe.
+        """
+        if self._disposed:
+            return
+
+        self._disposed = True
+        self._unsubscribe_job_update()
+        self._unsubscribe_job_done()
+        self.job_completed.clear()
+        super().dispose()
+        self._logger.debug("Disposed IndexingViewModel subscriptions.")
 
     # ── state ─────────────────────────────────────────────────────────────
     @property

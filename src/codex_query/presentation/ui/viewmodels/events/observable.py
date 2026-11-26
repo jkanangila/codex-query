@@ -49,3 +49,7 @@ class ObservableObject:
         This triggers all registered handlers to re-read state and redraw.
         """
         self._changed.emit(None)
+
+    def dispose(self) -> None:
+        """Remove all observers registered on this object."""
+        self._changed.clear()
