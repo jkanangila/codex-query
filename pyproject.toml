@@ -87,6 +87,19 @@ copyright = "Copyright (c) 2026 Kanangila"
 path = "src"    # bundle the whole package so absolute imports work
 module = "main" # src/main.py
 
+# ------------------------------------------------------------------------------
+# Desktop-only dependencies
+# ------------------------------------------------------------------------------
+
+[tool.flet.linux]
+dependencies = ["chromadb>=1.5.9", "asyncpg>=0.31.0"]
+
+[tool.flet.windows]
+dependencies = ["chromadb>=1.5.9", "asyncpg>=0.31.0"]
+
+[tool.flet.macos]
+dependencies = ["chromadb>=1.5.9", "asyncpg>=0.31.0"]
+
 [tool.flet.android]
 split_per_abi = true # smaller per-architecture APKs
 

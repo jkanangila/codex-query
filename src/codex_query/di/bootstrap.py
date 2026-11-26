@@ -97,7 +97,6 @@ from codex_query.infrastructure.llm.factory import (
     create_chat_adapter,
     create_embedding_adapter,
 )
-from codex_query.infrastructure.logging.config import configure_logging
 from codex_query.infrastructure.logging.factory import (
     PythonLoggerFactory,
     create_logger,
@@ -213,7 +212,6 @@ class CompositionRoot:
     @cached_property
     def logger_factory(self) -> LoggerFactoryPort:
         """LoggerFactoryPort: Factory for creating configured loggers."""
-        configure_logging()
         return PythonLoggerFactory()
 
     @cached_property

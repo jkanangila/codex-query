@@ -4,7 +4,7 @@ from alembic import context
 from sqlalchemy import create_engine
 from sqlmodel import SQLModel
 
-# Imported for side effects so SQLModel registers all table models on SQLModel.metadata.
+# Register all SQLModel tables.
 from codex_query.infrastructure.database.sqlmodel import (
     models,  # noqa: F401  # pyright: ignore[reportUnusedImport]
 )
@@ -15,17 +15,27 @@ logger = create_logger(__name__)
 
 target_metadata = SQLModel.metadata
 
-logger.info("Starting database migrations")
-try:
-    with create_engine(db_config.sync_url).connect() as conn:
-        context.configure(
-            connection=conn,
-            target_metadata=target_metadata,
-            render_as_batch=True,
-        )
-        with context.begin_transaction():
-            context.run_migrations()
-except Exception:
-    logger.exception("Database migrations failed")
-    raise
-logger.info("Database migrations completed")
+
+def run_migrations_online() -> None:
+    """Run migrations using a synchronous database connection."""
+    logger.info("Starting database migrations.")
+
+    engine = create_engine(db_config.sync_url)
+
+    try:
+        with engine.connect() as connection:
+            context.configure(
+                connection=connection,
+                target_metadata=target_metadata,
+                render_as_batch=True,
+            )
+
+            with context.begin_transaction():
+                context.run_migrations()
+    finally:
+        engine.dispose()
+
+    logger.info("Database migrations completed.")
+
+
+run_migrations_online()

@@ -16,7 +16,7 @@ from dotenv import load_dotenv
 
 from codex_query.di.bootstrap import CompositionRoot
 from codex_query.infrastructure.database.sqlmodel.config import db_config
-from codex_query.infrastructure.logging.config import asyncio_handler
+from codex_query.infrastructure.logging.config import asyncio_handler, configure_logging
 from codex_query.infrastructure.logging.factory import create_logger
 from codex_query.infrastructure.paths import AppPaths
 from codex_query.presentation.ui.app import CodexApp
@@ -122,6 +122,8 @@ def main() -> None:
     env_file = AppPaths.app_storage_data_dir() / ".env"
     if env_file.is_file():
         load_dotenv(env_file)
+
+    configure_logging()
 
     logger.info("Launching Flet application...")
     ft.run(_main)
