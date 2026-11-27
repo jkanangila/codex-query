@@ -10,7 +10,6 @@ import asyncio
 from typing import Any
 
 import flet as ft
-from dotenv import load_dotenv
 
 from codex_query.di.bootstrap import CompositionRoot
 from codex_query.infrastructure.database.sqlmodel.config import db_config
@@ -19,7 +18,7 @@ from codex_query.infrastructure.logging.config import (
     configure_logging,
 )
 from codex_query.infrastructure.logging.factory import create_logger
-from codex_query.infrastructure.paths import AppPaths
+from codex_query.infrastructure.utils import load_env
 from codex_query.presentation.ui.app import CodexApp
 from codex_query.presentation.ui.lifecycle.manager import ApplicationLifecycle
 from codex_query.presentation.ui.lifecycle.state import ApplicationState
@@ -143,10 +142,7 @@ def main() -> None:
     overriding pre-existing environment variables, configures logging, and
     starts the Flet runtime with `_main`.
     """
-    env_file = AppPaths.app_storage_data_dir() / ".env"
-    if env_file.is_file():
-        # Existing process environment variables intentionally take precedence.
-        load_dotenv(env_file, override=False)
+    load_env()
 
     configure_logging()
     logger.info("Launching Flet application.")
